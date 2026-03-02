@@ -378,9 +378,18 @@ class NavigatorWidget(QWidget):
             painter.drawPolygon(polygon)
 
     def _draw_circle_on_thumbnail(self, painter, points):
-        """Draw circle on thumbnail"""
+        """Draw circle/ellipse on thumbnail"""
         if len(points) >= 2:
             center = points[0]
+
+            if len(points) >= 5:
+                right = points[1]
+                bottom = points[2]
+                rx = abs(right.x() - center.x())
+                ry = abs(bottom.y() - center.y())
+                painter.drawEllipse(center, rx, ry)
+                return
+
             radius_point = points[1]
             radius = int(
                 (

@@ -21,6 +21,16 @@ DEFAULT_HVERTEX_FILL_COLOR = QtGui.QColor(255, 255, 255, 255)  # hovering
 class Shape:
     """Shape data type"""
 
+    # Circle / ellipse handling:
+    # - Legacy circle uses 2 points: [center, edge_point]
+    # - Ellipse uses 5 points: [center, right, bottom, left, top]
+    ELLIPSE_POINT_COUNT = 5
+    _ELLIPSE_CENTER = 0
+    _ELLIPSE_RIGHT = 1
+    _ELLIPSE_BOTTOM = 2
+    _ELLIPSE_LEFT = 3
+    _ELLIPSE_TOP = 4
+
     # Render handles as squares
     P_SQUARE = 0
 
@@ -112,10 +122,20 @@ class Shape:
         self.shape_type = shape_type
 
     def to_dict(self):
+        points = self.points
+        # Keep backwards compatibility for circles: if an ellipse-handle circle is
+        # still a perfect circle, save it using the legacy 2-point format.
+        if self.shape_type == "circle" and len(self.points) == self.ELLIPSE_POINT_COUNT:
+            center = self.points[self._ELLIPSE_CENTER]
+            rx = abs(self.points[self._ELLIPSE_RIGHT].x() - center.x())
+            ry = abs(self.points[self._ELLIPSE_BOTTOM].y() - center.y())
+            if abs(rx - ry) < 1e-6:
+                points = [self.points[self._ELLIPSE_CENTER], self.points[self._ELLIPSE_RIGHT]]
+
         dictData = {
             "label": self.label,
             "score": self.score,
-            "points": [(p.x(), p.y()) for p in self.points],
+            "points": [(p.x(), p.y()) for p in points],
             "group_id": self.group_id,
             "description": self.description,
             "difficult": self.difficult,
@@ -316,17 +336,20 @@ class Shape:
                     if self.is_closed() or self.label is not None:
                         line_path.lineTo(self.points[0])
             elif self.shape_type == "circle":
-                if len(self.points) not in [1, 2]:
+                if len(self.points) not in [1, 2, self.ELLIPSE_POINT_COUNT]:
                     logger.error(
                         f"Invalid points count for circle: "
-                        f"expected 1 or 2, got {len(self.points)}"
+                        f"expected 1, 2 or {self.ELLIPSE_POINT_COUNT}, got {len(self.points)}"
                     )
                     return
-                if len(self.points) == 2:
-                    rectangle = self.get_circle_rect_from_line(self.points)
+                rectangle = self.get_circle_or_ellipse_rect()
+                if rectangle is not None:
                     line_path.addEllipse(rectangle)
                 if self.selected:
-                    for i in range(len(self.points)):
+                    start = 0
+                    if len(self.points) == self.ELLIPSE_POINT_COUNT:
+                        start = 1  # Hide center handle, show 4 axis handles.
+                    for i in range(start, len(self.points)):
                         self.draw_vertex(vrtx_path, i)
             elif self.shape_type == "linestrip":
                 line_path.moveTo(self.points[0])
@@ -490,7 +513,10 @@ class Shape:
         """
         min_distance = float("inf")
         min_i = None
-        for i, p in enumerate(self.points):
+        start = 0
+        if self.shape_type == "circle" and len(self.points) == self.ELLIPSE_POINT_COUNT:
+            start = 1  # Skip center handle for ellipse editing.
+        for i, p in enumerate(self.points[start:], start=start):
             dist = utils.distance(p - point)
             if dist <= epsilon and dist < min_distance:
                 min_distance = dist
@@ -523,6 +549,50 @@ class Shape:
         rectangle = QtCore.QRectF(c.x() - d, c.y() - d, 2 * d, 2 * d)
         return rectangle
 
+    def convert_circle_to_ellipse(self):
+        """Convert legacy 2-point circle to 5-point ellipse handles (axis-aligned).
+
+        Legacy circle points are: [center, edge_point].
+        Ellipse points are: [center, right, bottom, left, top].
+        """
+        if self.shape_type != "circle" or len(self.points) != 2:
+            return False
+
+        center, edge = self.points
+        r = math.hypot(edge.x() - center.x(), edge.y() - center.y())
+        if r <= 0:
+            r = 1.0
+
+        self.points = [
+            center,
+            QtCore.QPointF(center.x() + r, center.y()),
+            QtCore.QPointF(center.x(), center.y() + r),
+            QtCore.QPointF(center.x() - r, center.y()),
+            QtCore.QPointF(center.x(), center.y() - r),
+        ]
+        return True
+
+    def get_circle_or_ellipse_rect(self):
+        """Return QRectF for circle (2-pt) or ellipse (5-pt)."""
+        if self.shape_type != "circle":
+            return None
+
+        if len(self.points) == 2:
+            return self.get_circle_rect_from_line(self.points)
+
+        if len(self.points) == self.ELLIPSE_POINT_COUNT:
+            center = self.points[self._ELLIPSE_CENTER]
+            rx = abs(self.points[self._ELLIPSE_RIGHT].x() - center.x())
+            ry = abs(self.points[self._ELLIPSE_BOTTOM].y() - center.y())
+            return QtCore.QRectF(
+                center.x() - rx,
+                center.y() - ry,
+                2 * rx,
+                2 * ry,
+            )
+
+        return None
+
     def make_path(self):
         """Create a path from shape"""
         if not self.points:
@@ -533,8 +603,8 @@ class Shape:
                 path.lineTo(p)
         elif self.shape_type == "circle":
             path = QtGui.QPainterPath()
-            if len(self.points) == 2:
-                rectangle = self.get_circle_rect_from_line(self.points)
+            rectangle = self.get_circle_or_ellipse_rect()
+            if rectangle is not None:
                 path.addEllipse(rectangle)
         else:
             path = QtGui.QPainterPath(self.points[0])
@@ -552,6 +622,39 @@ class Shape:
 
     def move_vertex_by(self, i, offset):
         """Move a specific vertex by an offset"""
+        if self.shape_type == "circle" and len(self.points) == self.ELLIPSE_POINT_COUNT:
+            if i == self._ELLIPSE_CENTER:
+                self.move_by(offset)
+                return
+
+            center = self.points[self._ELLIPSE_CENTER]
+            new_pos = self.points[i] + offset
+            rx = abs(self.points[self._ELLIPSE_RIGHT].x() - center.x())
+            ry = abs(self.points[self._ELLIPSE_BOTTOM].y() - center.y())
+
+            if i in (self._ELLIPSE_RIGHT, self._ELLIPSE_LEFT):
+                rx = abs(new_pos.x() - center.x())
+            elif i in (self._ELLIPSE_BOTTOM, self._ELLIPSE_TOP):
+                ry = abs(new_pos.y() - center.y())
+
+            # Keep ellipse editable (avoid degenerate sizes).
+            rx = max(rx, 1.0)
+            ry = max(ry, 1.0)
+
+            self.points[self._ELLIPSE_RIGHT] = QtCore.QPointF(
+                center.x() + rx, center.y()
+            )
+            self.points[self._ELLIPSE_LEFT] = QtCore.QPointF(
+                center.x() - rx, center.y()
+            )
+            self.points[self._ELLIPSE_BOTTOM] = QtCore.QPointF(
+                center.x(), center.y() + ry
+            )
+            self.points[self._ELLIPSE_TOP] = QtCore.QPointF(
+                center.x(), center.y() - ry
+            )
+            return
+
         self.points[i] = self.points[i] + offset
 
     def highlight_vertex(self, i, action):

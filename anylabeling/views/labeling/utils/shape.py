@@ -138,21 +138,28 @@ def shape_conversion(self, mode):
                     data["shapes"][j]["shape_type"] == "circle"
                 ):
                     points = np.array(data["shapes"][j]["points"])
-                    if len(points) != 2:
+                    if len(points) not in [2, 5]:
                         continue
 
                     center_x, center_y = points[0]
-                    edge_x, edge_y = points[1]
-                    radius = math.sqrt(
-                        (edge_x - center_x) ** 2 + (edge_y - center_y) ** 2
-                    )
+                    if len(points) == 2:
+                        edge_x, edge_y = points[1]
+                        rx = math.sqrt(
+                            (edge_x - center_x) ** 2 + (edge_y - center_y) ** 2
+                        )
+                        ry = rx
+                    else:
+                        right_x, _ = points[1]
+                        _, bottom_y = points[2]
+                        rx = abs(right_x - center_x)
+                        ry = abs(bottom_y - center_y)
 
                     num_sides = params.get("num_sides", 32)
                     polygon_points = []
                     for i in range(num_sides):
                         angle = 2 * math.pi * i / num_sides
-                        x = center_x + radius * math.cos(angle)
-                        y = center_y + radius * math.sin(angle)
+                        x = center_x + rx * math.cos(angle)
+                        y = center_y + ry * math.sin(angle)
                         polygon_points.append([x, y])
 
                     data["shapes"][j]["shape_type"] = "polygon"
@@ -203,13 +210,30 @@ def shape_to_mask(
     draw = PIL.ImageDraw.Draw(mask)
     xy = [tuple(point) for point in points]
     if shape_type == "circle":
-        assert len(xy) == 2, "Shape of shape_type=circle must have 2 points"
-        (cx, cy), (px, py) = xy
-        d = math.sqrt((cx - px) ** 2 + (cy - py) ** 2)
-        draw.ellipse([cx - d, cy - d, cx + d, cy + d], outline=1, fill=1)
+        assert len(xy) in [
+            2,
+            5,
+        ], "Shape of shape_type=circle must have 2 points (circle) or 5 points (ellipse)"
+        (cx, cy) = xy[0]
+        if len(xy) == 2:
+            (px, py) = xy[1]
+            rx = math.sqrt((cx - px) ** 2 + (cy - py) ** 2)
+            ry = rx
+        else:
+            (right_x, _right_y) = xy[1]
+            (_bottom_x, bottom_y) = xy[2]
+            rx = abs(right_x - cx)
+            ry = abs(bottom_y - cy)
+        draw.ellipse([cx - rx, cy - ry, cx + rx, cy + ry], outline=1, fill=1)
     elif shape_type == "rectangle":
-        assert len(xy) == 2, "Shape of shape_type=rectangle must have 2 points"
-        draw.rectangle(xy, outline=1, fill=1)
+        assert len(xy) in [
+            2,
+            4,
+        ], "Shape of shape_type=rectangle must have 2 points or 4 points"
+        if len(xy) == 2:
+            draw.rectangle(xy, outline=1, fill=1)
+        else:
+            draw.polygon(xy=xy, outline=1, fill=1)
     elif shape_type == "rotation":
         assert len(xy) == 4, "Shape of shape_type=rotation must have 4 points"
         draw.polygon(xy=xy, outline=1, fill=1)

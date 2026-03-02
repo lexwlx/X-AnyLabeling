@@ -519,6 +519,16 @@ class LabelingWidget(LabelDialog):
             checked=self._config["auto_save"],
         )
 
+        save_mask_auto = action(
+            text=self.tr("Save Mask Automatically"),
+            slot=lambda x: self._config.update({"auto_save_mask": x}),
+            icon=None,
+            tip=self.tr("Save mask automatically with label file"),
+            checkable=True,
+            enabled=True,
+            checked=self._config.get("auto_save_mask", True),
+        )
+
         save_with_image_data = action(
             text=self.tr("Save With Image Data"),
             slot=lambda x: self._config.update({"store_data": x}),
@@ -1578,6 +1588,7 @@ class LabelingWidget(LabelDialog):
         # Store actions for further handling.
         self.actions = utils.Struct(
             save_auto=save_auto,
+            save_mask_auto=save_mask_auto,
             save_with_image_data=save_with_image_data,
             change_output_dir=change_output_dir,
             save=save,
@@ -1813,6 +1824,7 @@ class LabelingWidget(LabelDialog):
                 save,
                 save_as,
                 save_auto,
+                save_mask_auto,
                 change_output_dir,
                 save_with_image_data,
                 close,
@@ -4153,6 +4165,40 @@ class LabelingWidget(LabelDialog):
         unique_gid_list.sort()
         self.gid_filter_combobox.update_items(unique_gid_list)
 
+    def _build_auto_mask(self, shapes, image_height, image_width):
+        """Build a single-channel mask from current shapes.
+
+        Pixels covered by any shape are filled with 255, background is 0.
+        """
+        mask = np.zeros((image_height, image_width), dtype=np.uint8)
+        for shape in shapes:
+            points = shape.get("points", [])
+            if not points:
+                continue
+
+            shape_type = shape.get("shape_type", "polygon")
+            try:
+                shape_mask = utils.shape_to_mask(
+                    (image_height, image_width),
+                    points,
+                    shape_type=shape_type,
+                )
+            except AssertionError as e:
+                logger.warning(
+                    f"Skip invalid shape for mask export: {shape_type}, {e}"
+                )
+                continue
+
+            mask[shape_mask] = 255
+
+        return mask
+
+    def _save_auto_mask(self, json_filename, shapes, image_height, image_width):
+        mask = self._build_auto_mask(shapes, image_height, image_width)
+        mask_filename = osp.splitext(json_filename)[0] + ".png"
+        cv2.imencode(".png", mask)[1].tofile(mask_filename)
+        return mask_filename
+
     def save_labels(self, filename):
         label_file = LabelFile()
         # Get current shapes
@@ -4191,6 +4237,18 @@ class LabelingWidget(LabelDialog):
                 other_data=self.other_data,
                 flags=flags,
             )
+
+            if self._config.get("auto_save_mask", True):
+                try:
+                    self._save_auto_mask(
+                        filename,
+                        shapes,
+                        self.image.height(),
+                        self.image.width(),
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to auto-save mask: {e}")
+
             self.label_file = label_file
             items = self.file_list_widget.findItems(
                 self.image_path, Qt.MatchFlag.MatchExactly

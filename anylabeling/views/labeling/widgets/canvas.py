@@ -134,7 +134,18 @@ class Canvas(
         self.snapping = True
         self.h_shape_is_selected = False
         self.h_shape_is_hovered = None
-        self.allowed_oop_shape_types = ["rotation", "quadrilateral"]
+        # Shapes that are allowed to be moved/edited outside the image bounds.
+        # Keeping this broad allows partial objects near borders to be annotated.
+        self.allowed_oop_shape_types = [
+            "polygon",
+            "rectangle",
+            "rotation",
+            "quadrilateral",
+            "point",
+            "line",
+            "circle",
+            "linestrip",
+        ]
         self._painter = QtGui.QPainter()
         self._cursor = CURSOR_DEFAULT
         # Menus:
@@ -532,11 +543,10 @@ class Canvas(
                 self.show_shape.emit(shape_height, shape_width, pos)
 
             color = QtGui.QColor(0, 0, 255)
-            if self.out_off_pixmap(pos) and self.create_mode not in [
-                "rectangle",
-                "rotation",
-                "quadrilateral",
-            ]:
+            if (
+                self.out_off_pixmap(pos)
+                and self.create_mode not in self.allowed_oop_shape_types
+            ):
                 pos = self.intersection_point(self.current[-1], pos)
             elif (
                 self.snapping
@@ -883,6 +893,8 @@ class Canvas(
                     elif self.create_mode in ["circle", "line"]:
                         assert len(self.current.points) == 1
                         self.current.points = self.line.points
+                        if self.create_mode == "circle":
+                            self.current.convert_circle_to_ellipse()
                         self.finalise()
                     elif self.create_mode == "rectangle":
                         if self.current.reach_max_points() is False:
@@ -967,11 +979,10 @@ class Canvas(
                         self.set_hiding()
                         self.drawing_polygon.emit(True)
                         self.update()
-                elif self.out_off_pixmap(pos) and self.create_mode in [
-                    "rectangle",
-                    "rotation",
-                    "quadrilateral",
-                ]:
+                elif (
+                    self.out_off_pixmap(pos)
+                    and self.create_mode in self.allowed_oop_shape_types
+                ):
                     # Create new shape.
                     self.current = Shape(shape_type=self.create_mode)
                     self.current.add_point(pos)
@@ -1145,6 +1156,9 @@ class Canvas(
 
     def select_shapes(self, shapes):
         """Select some shapes"""
+        for shape in shapes:
+            if shape.shape_type == "circle":
+                shape.convert_circle_to_ellipse()
         self.set_hiding()
         self.selection_changed.emit(shapes)
         self.update()
@@ -1189,6 +1203,8 @@ class Canvas(
                     shape_selectable = True
 
                 if shape_selectable:
+                    if shape.shape_type == "circle":
+                        shape.convert_circle_to_ellipse()
                     self.set_hiding()
                     if shape not in self.selected_shapes:
                         if multiple_selection_mode:
@@ -1703,10 +1719,8 @@ class Canvas(
                             mask_path.lineTo(point)
                         mask_path.closeSubpath()
                 elif shape.shape_type == "circle":
-                    if len(shape.points) == 2:
-                        rectangle = shape.get_circle_rect_from_line(
-                            shape.points
-                        )
+                    rectangle = shape.get_circle_or_ellipse_rect()
+                    if rectangle is not None:
                         mask_path.addEllipse(rectangle)
 
                 fill_color = (
@@ -2316,21 +2330,6 @@ class Canvas(
         if self.current.label is None:
             self.current.label = ""
         self.current.close()
-        if self.current.shape_type == "rectangle":
-            if not self.clip_rectangle_to_pixmap(self.current):
-                self.current = None
-                self.set_hiding(False)
-                self.drawing_polygon.emit(False)
-                self.update()
-                return
-        elif self.current.shape_type == "rotation":
-            if not self.clip_rotation_to_pixmap(self.current):
-                self.current = None
-                self.set_hiding(False)
-                self.drawing_polygon.emit(False)
-                self.update()
-                return
-
         self.shapes.append(self.current)
         self.store_shapes()
         self.current = None
