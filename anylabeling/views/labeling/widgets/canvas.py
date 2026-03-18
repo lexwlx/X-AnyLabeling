@@ -255,6 +255,92 @@ class Canvas(
         """Set shape filling option"""
         self._fill_drawing = value
 
+    def _scaled_overlay_value(self, pixels: float) -> float:
+        """Convert a screen-space size to canvas coordinates."""
+        scale = max(self.scale, 0.01)
+        return pixels / scale
+
+    def _overlay_font(
+        self,
+        pixels: float,
+        weight: QtGui.QFont.Weight = QtGui.QFont.Weight.Normal,
+    ) -> QtGui.QFont:
+        """Create a font that keeps a stable on-screen size across zoom levels."""
+        font = QtGui.QFont("Arial")
+        font.setWeight(weight)
+        font.setPointSizeF(max(1.0, self._scaled_overlay_value(pixels)))
+        return font
+
+    def _rect_fits_pixmap(self, rect: QtCore.QRectF) -> bool:
+        """Check whether a rectangle stays fully inside the current image."""
+        if self.pixmap is None or self.pixmap.isNull():
+            return True
+        return (
+            rect.x() >= 0
+            and rect.y() >= 0
+            and rect.x() + rect.width() <= self.pixmap.width()
+            and rect.y() + rect.height() <= self.pixmap.height()
+        )
+
+    def _clamp_rect_to_pixmap(self, rect: QtCore.QRectF) -> QtCore.QRectF:
+        """Clamp a rectangle so it remains visible within the image bounds."""
+        if self.pixmap is None or self.pixmap.isNull():
+            return rect
+
+        max_x = max(0.0, float(self.pixmap.width()) - rect.width())
+        max_y = max(0.0, float(self.pixmap.height()) - rect.height())
+        return QtCore.QRectF(
+            min(max(rect.x(), 0.0), max_x),
+            min(max(rect.y(), 0.0), max_y),
+            rect.width(),
+            rect.height(),
+        )
+
+    def _get_label_rect(
+        self, shape: Shape, rect_width: float, rect_height: float
+    ) -> QtCore.QRectF:
+        """Place labels outside the target first so they cover less detail."""
+        bbox = shape.bounding_rect().normalized()
+        margin = self._scaled_overlay_value(3.0)
+
+        candidates = (
+            QtCore.QRectF(
+                bbox.left(),
+                bbox.top() - rect_height - margin,
+                rect_width,
+                rect_height,
+            ),
+            QtCore.QRectF(
+                bbox.right() + margin,
+                bbox.top(),
+                rect_width,
+                rect_height,
+            ),
+            QtCore.QRectF(
+                bbox.left(),
+                bbox.bottom() + margin,
+                rect_width,
+                rect_height,
+            ),
+            QtCore.QRectF(
+                bbox.left() - rect_width - margin,
+                bbox.top(),
+                rect_width,
+                rect_height,
+            ),
+            QtCore.QRectF(
+                bbox.left(),
+                bbox.top(),
+                rect_width,
+                rect_height,
+            ),
+        )
+
+        for rect in candidates:
+            if self._rect_fits_pixmap(rect):
+                return rect
+        return self._clamp_rect_to_pixmap(candidates[0])
+
     @property
     def create_mode(self):
         """Create mode for canvas - Modes: polygon, rectangle, rotation, circle,..."""
@@ -1937,16 +2023,13 @@ class Canvas(
 
         # Draw labels
         if self.show_labels:
-            p.setFont(
-                QtGui.QFont(
-                    "Arial", int(max(6.0, int(round(8.0 / Shape.scale))))
-                )
-            )
+            font = self._overlay_font(6.0)
+            p.setFont(font)
+            fm = QtGui.QFontMetricsF(font)
+            padding_x = self._scaled_overlay_value(3.0)
+            padding_y = self._scaled_overlay_value(1.5)
             labels = []
             for shape in self.shapes:
-                if not shape.visible:
-                    continue
-                d_react = shape.point_size / shape.scale
                 if not shape.visible:
                     continue
                 if shape.label in [
@@ -1970,92 +2053,32 @@ class Canvas(
                 )
                 if not label_text:
                     continue
-                fm = QtGui.QFontMetrics(p.font())
                 text_rect = fm.tightBoundingRect(label_text)
-                padding_x = 4
-                padding_y = 2
                 rect_width = text_rect.width() + 2 * padding_x
                 rect_height = fm.height() + 2 * padding_y
 
-                if shape.shape_type in [
-                    "rectangle",
-                    "polygon",
-                    "rotation",
-                    "quadrilateral",
-                ]:
-                    try:
-                        bbox = shape.bounding_rect()
-                    except IndexError:
-                        continue
-                    rect = QtCore.QRect(
-                        int(bbox.x()),
-                        int(bbox.y()),
-                        rect_width,
-                        rect_height,
+                try:
+                    rect = self._get_label_rect(
+                        shape, rect_width, rect_height
                     )
-                    text_pos = QtCore.QPoint(
-                        int(bbox.x() + padding_x),
-                        int(bbox.y() + rect_height - padding_y - fm.descent()),
-                    )
-                elif shape.shape_type == "circle":
-                    points = shape.points
-                    if not points:
-                        continue
-                    point = points[0]
-                    rect = QtCore.QRect(
-                        int(point.x() - rect_width / 2),
-                        int(point.y() - rect_height / 2),
-                        rect_width,
-                        rect_height,
-                    )
-                    text_pos = QtCore.QPoint(
-                        int(point.x() - rect_width / 2 + padding_x),
-                        int(
-                            point.y()
-                            + rect_height / 2
-                            - padding_y
-                            - fm.descent()
-                        ),
-                    )
-                elif shape.shape_type in [
-                    "line",
-                    "linestrip",
-                    "point",
-                ]:
-                    points = shape.points
-                    if not points:
-                        continue
-                    point = points[0]
-                    rect = QtCore.QRect(
-                        int(point.x() + d_react),
-                        int(point.y() - 15),
-                        rect_width,
-                        rect_height,
-                    )
-                    text_pos = QtCore.QPoint(
-                        int(point.x() + d_react + padding_x),
-                        int(
-                            point.y()
-                            - 15
-                            + rect_height
-                            - padding_y
-                            - fm.descent()
-                        ),
-                    )
-                else:
+                except IndexError:
                     continue
+                text_pos = QtCore.QPointF(
+                    rect.x() + padding_x,
+                    rect.y() + rect.height() - padding_y - fm.descent(),
+                )
                 labels.append((shape, rect, text_pos, label_text))
 
-            pen = QtGui.QPen(QtGui.QColor("#FFA500"), 8, Qt.PenStyle.SolidLine)
-            p.setPen(pen)
+            p.setPen(Qt.PenStyle.NoPen)
             for shape, rect, _, _ in labels:
                 if not shape.visible:
                     continue
-                p.fillRect(rect, shape.line_color)
+                fill_color = QtGui.QColor(shape.line_color)
+                fill_color.setAlpha(min(fill_color.alpha(), 180))
+                p.fillRect(rect, fill_color)
 
-            pen = QtGui.QPen(QtGui.QColor("#000000"), 8, Qt.PenStyle.SolidLine)
-            p.setPen(pen)
-            for _, _, text_pos, label_text in labels:
+            p.setPen(QtGui.QColor("#000000"))
+            for shape, _, text_pos, label_text in labels:
                 if not shape.visible:
                     continue
                 p.drawText(text_pos, label_text)
