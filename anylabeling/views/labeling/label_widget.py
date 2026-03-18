@@ -643,6 +643,16 @@ class LabelingWidget(LabelDialog):
             self.tr("Start drawing circles"),
             enabled=False,
         )
+        create_circle_fit_mode = action(
+            self.tr("Create Circle/Ellipse Fit"),
+            lambda: self.toggle_draw_mode(False, create_mode="circle_fit"),
+            shortcuts["create_circle_fit"],
+            "circle-selection",
+            self.tr(
+                "Click boundary points and finish with Enter/Ctrl+Click/Double-click"
+            ),
+            enabled=False,
+        )
         create_line_mode = action(
             self.tr("Create Line"),
             lambda: self.toggle_draw_mode(False, create_mode="line"),
@@ -1620,6 +1630,7 @@ class LabelingWidget(LabelDialog):
             create_rotation_mode=create_rotation_mode,
             create_quadrilateral_mode=create_quadrilateral_mode,
             create_circle_mode=create_circle_mode,
+            create_circle_fit_mode=create_circle_fit_mode,
             create_line_mode=create_line_mode,
             create_point_mode=create_point_mode,
             create_line_strip_mode=create_line_strip_mode,
@@ -1741,6 +1752,7 @@ class LabelingWidget(LabelDialog):
                 create_rotation_mode,
                 create_quadrilateral_mode,
                 create_circle_mode,
+                create_circle_fit_mode,
                 create_line_mode,
                 create_point_mode,
                 create_line_strip_mode,
@@ -1764,6 +1776,7 @@ class LabelingWidget(LabelDialog):
                 create_rotation_mode,
                 create_quadrilateral_mode,
                 create_circle_mode,
+                create_circle_fit_mode,
                 create_line_mode,
                 create_point_mode,
                 create_line_strip_mode,
@@ -2002,6 +2015,7 @@ class LabelingWidget(LabelDialog):
             self.actions.create_rotation_mode,
             self.actions.create_quadrilateral_mode,
             self.actions.create_circle_mode,
+            self.actions.create_circle_fit_mode,
             self.actions.create_line_mode,
             self.actions.create_point_mode,
             self.actions.create_line_strip_mode,
@@ -2549,6 +2563,7 @@ class LabelingWidget(LabelDialog):
             self.actions.create_rotation_mode,
             self.actions.create_quadrilateral_mode,
             self.actions.create_circle_mode,
+            self.actions.create_circle_fit_mode,
             self.actions.create_line_mode,
             self.actions.create_point_mode,
             self.actions.create_line_strip_mode,
@@ -2612,6 +2627,7 @@ class LabelingWidget(LabelDialog):
         self.actions.create_rotation_mode.setEnabled(True)
         self.actions.create_quadrilateral_mode.setEnabled(True)
         self.actions.create_circle_mode.setEnabled(True)
+        self.actions.create_circle_fit_mode.setEnabled(True)
         self.actions.create_line_mode.setEnabled(True)
         self.actions.create_point_mode.setEnabled(True)
         self.actions.create_line_strip_mode.setEnabled(True)
@@ -3127,8 +3143,12 @@ class LabelingWidget(LabelDialog):
         if not edit:
             self.set_text_editing(False)
 
+        circle_fit_mode = create_mode == "circle_fit"
+        canvas_mode = "linestrip" if circle_fit_mode else create_mode
+
         self.canvas.set_editing(edit)
-        self.canvas.create_mode = create_mode
+        self.canvas.create_mode = canvas_mode
+        self.canvas.set_circle_fit_mode(circle_fit_mode)
         self.canvas._brush_drawing = False
         if edit:
             self.actions.create_mode.setEnabled(True)
@@ -3137,6 +3157,7 @@ class LabelingWidget(LabelDialog):
             self.actions.create_rotation_mode.setEnabled(True)
             self.actions.create_quadrilateral_mode.setEnabled(True)
             self.actions.create_circle_mode.setEnabled(True)
+            self.actions.create_circle_fit_mode.setEnabled(True)
             self.actions.create_line_mode.setEnabled(True)
             self.actions.create_point_mode.setEnabled(True)
             self.actions.create_line_strip_mode.setEnabled(True)
@@ -3160,6 +3181,7 @@ class LabelingWidget(LabelDialog):
                 self.actions.create_rotation_mode.setEnabled(True)
                 self.actions.create_quadrilateral_mode.setEnabled(True)
                 self.actions.create_circle_mode.setEnabled(True)
+                self.actions.create_circle_fit_mode.setEnabled(True)
                 self.actions.create_line_mode.setEnabled(True)
                 self.actions.create_point_mode.setEnabled(True)
                 self.actions.create_line_strip_mode.setEnabled(True)
@@ -3170,6 +3192,7 @@ class LabelingWidget(LabelDialog):
                 self.actions.create_rotation_mode.setEnabled(True)
                 self.actions.create_quadrilateral_mode.setEnabled(True)
                 self.actions.create_circle_mode.setEnabled(True)
+                self.actions.create_circle_fit_mode.setEnabled(True)
                 self.actions.create_line_mode.setEnabled(True)
                 self.actions.create_point_mode.setEnabled(True)
                 self.actions.create_line_strip_mode.setEnabled(True)
@@ -3180,6 +3203,7 @@ class LabelingWidget(LabelDialog):
                 self.actions.create_rotation_mode.setEnabled(True)
                 self.actions.create_quadrilateral_mode.setEnabled(True)
                 self.actions.create_circle_mode.setEnabled(True)
+                self.actions.create_circle_fit_mode.setEnabled(True)
                 self.actions.create_line_mode.setEnabled(False)
                 self.actions.create_point_mode.setEnabled(True)
                 self.actions.create_line_strip_mode.setEnabled(True)
@@ -3190,6 +3214,7 @@ class LabelingWidget(LabelDialog):
                 self.actions.create_rotation_mode.setEnabled(True)
                 self.actions.create_quadrilateral_mode.setEnabled(True)
                 self.actions.create_circle_mode.setEnabled(True)
+                self.actions.create_circle_fit_mode.setEnabled(True)
                 self.actions.create_line_mode.setEnabled(True)
                 self.actions.create_point_mode.setEnabled(False)
                 self.actions.create_line_strip_mode.setEnabled(True)
@@ -3200,6 +3225,7 @@ class LabelingWidget(LabelDialog):
                 self.actions.create_rotation_mode.setEnabled(True)
                 self.actions.create_quadrilateral_mode.setEnabled(True)
                 self.actions.create_circle_mode.setEnabled(False)
+                self.actions.create_circle_fit_mode.setEnabled(True)
                 self.actions.create_line_mode.setEnabled(True)
                 self.actions.create_point_mode.setEnabled(True)
                 self.actions.create_line_strip_mode.setEnabled(True)
@@ -3210,9 +3236,21 @@ class LabelingWidget(LabelDialog):
                 self.actions.create_rotation_mode.setEnabled(True)
                 self.actions.create_quadrilateral_mode.setEnabled(True)
                 self.actions.create_circle_mode.setEnabled(True)
+                self.actions.create_circle_fit_mode.setEnabled(True)
                 self.actions.create_line_mode.setEnabled(True)
                 self.actions.create_point_mode.setEnabled(True)
                 self.actions.create_line_strip_mode.setEnabled(False)
+            elif create_mode == "circle_fit":
+                self.actions.create_mode.setEnabled(True)
+                self.actions.create_brush_polygon_mode.setEnabled(True)
+                self.actions.create_rectangle_mode.setEnabled(True)
+                self.actions.create_rotation_mode.setEnabled(True)
+                self.actions.create_quadrilateral_mode.setEnabled(True)
+                self.actions.create_circle_mode.setEnabled(True)
+                self.actions.create_circle_fit_mode.setEnabled(False)
+                self.actions.create_line_mode.setEnabled(True)
+                self.actions.create_point_mode.setEnabled(True)
+                self.actions.create_line_strip_mode.setEnabled(True)
             elif create_mode == "rotation":
                 self.actions.create_mode.setEnabled(True)
                 self.actions.create_brush_polygon_mode.setEnabled(True)
@@ -3220,6 +3258,7 @@ class LabelingWidget(LabelDialog):
                 self.actions.create_rotation_mode.setEnabled(False)
                 self.actions.create_quadrilateral_mode.setEnabled(True)
                 self.actions.create_circle_mode.setEnabled(True)
+                self.actions.create_circle_fit_mode.setEnabled(True)
                 self.actions.create_line_mode.setEnabled(True)
                 self.actions.create_point_mode.setEnabled(True)
                 self.actions.create_line_strip_mode.setEnabled(True)
@@ -3230,6 +3269,7 @@ class LabelingWidget(LabelDialog):
                 self.actions.create_rotation_mode.setEnabled(True)
                 self.actions.create_quadrilateral_mode.setEnabled(False)
                 self.actions.create_circle_mode.setEnabled(True)
+                self.actions.create_circle_fit_mode.setEnabled(True)
                 self.actions.create_line_mode.setEnabled(True)
                 self.actions.create_point_mode.setEnabled(True)
                 self.actions.create_line_strip_mode.setEnabled(True)
@@ -4238,16 +4278,17 @@ class LabelingWidget(LabelDialog):
                 flags=flags,
             )
 
-            if self._config.get("auto_save_mask", True):
-                try:
-                    self._save_auto_mask(
-                        filename,
-                        shapes,
-                        self.image.height(),
-                        self.image.width(),
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to auto-save mask: {e}")
+            # Auto-save mask is temporarily disabled.
+            # if self._config.get("auto_save_mask", True):
+            #     try:
+            #         self._save_auto_mask(
+            #             filename,
+            #             shapes,
+            #             self.image.height(),
+            #             self.image.width(),
+            #         )
+            #     except Exception as e:
+            #         logger.warning(f"Failed to auto-save mask: {e}")
 
             self.label_file = label_file
             items = self.file_list_widget.findItems(

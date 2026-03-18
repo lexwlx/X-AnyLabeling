@@ -2,6 +2,7 @@ import json
 import math
 import uuid
 
+import cv2
 import numpy as np
 import PIL.Image
 import PIL.ImageDraw
@@ -16,6 +17,113 @@ from anylabeling.views.labeling.widgets import PolygonSidesDialog, Popup
 from anylabeling.views.labeling.utils.qt import new_icon_path
 from anylabeling.views.labeling.utils.style import *
 from anylabeling.services.auto_labeling.utils import calculate_rotation_theta
+
+
+def _fit_circle_least_squares(points):
+    """Fit a circle using linear least squares.
+
+    Args:
+        points (np.ndarray): Nx2 float array.
+
+    Returns:
+        tuple[float, float, float] | None: (cx, cy, r) or None on failure.
+    """
+    if points.shape[0] < 3:
+        return None
+
+    x = points[:, 0]
+    y = points[:, 1]
+    a = np.column_stack((2 * x, 2 * y, np.ones_like(x)))
+    b = x * x + y * y
+
+    if np.linalg.matrix_rank(a) < 3:
+        return None
+
+    try:
+        solution, *_ = np.linalg.lstsq(a, b, rcond=None)
+    except np.linalg.LinAlgError:
+        return None
+
+    cx, cy, c = solution
+    r_sq = cx * cx + cy * cy + c
+    if r_sq <= 1e-6:
+        return None
+
+    return float(cx), float(cy), float(math.sqrt(r_sq))
+
+
+def fit_circle_or_ellipse(points, circle_threshold=0.05):
+    """Fit circle/ellipse from clicked points for interactive annotation.
+
+    The returned shape always uses shape_type='circle' with:
+      - Circle: 2 points [center, edge]
+      - Ellipse: 5 points [center, right, bottom, left, top]
+
+    Args:
+        points (list[list[float]]): Clicked boundary points.
+        circle_threshold (float): Relative axis difference threshold to
+            classify an ellipse fit as a circle.
+
+    Returns:
+        dict: {"shape_type": "circle", "points": [...]}
+
+    Raises:
+        ValueError: If there are not enough valid points for fitting.
+    """
+    pts = np.asarray(points, dtype=np.float64)
+    if pts.ndim != 2 or pts.shape[1] != 2:
+        raise ValueError("points must be an Nx2 array")
+    if pts.shape[0] < 3:
+        raise ValueError("At least 3 points are required")
+
+    if pts.shape[0] >= 5:
+        contour = pts.astype(np.float32).reshape(-1, 1, 2)
+        try:
+            (cx, cy), (axis1, axis2), angle_deg = cv2.fitEllipse(contour)
+            rx_rot = max(float(axis1) / 2.0, 1.0)
+            ry_rot = max(float(axis2) / 2.0, 1.0)
+            theta = math.radians(float(angle_deg))
+
+            # Convert rotated ellipse to axis-aligned radii (bounding extents).
+            rx = math.sqrt(
+                (rx_rot * math.cos(theta)) ** 2
+                + (ry_rot * math.sin(theta)) ** 2
+            )
+            ry = math.sqrt(
+                (rx_rot * math.sin(theta)) ** 2
+                + (ry_rot * math.cos(theta)) ** 2
+            )
+
+            rx = max(float(rx), 1.0)
+            ry = max(float(ry), 1.0)
+            axis_delta = abs(rx - ry) / max(rx, ry)
+
+            if axis_delta <= circle_threshold:
+                r = (rx + ry) / 2.0
+                return {
+                    "shape_type": "circle",
+                    "points": [[cx, cy], [cx + r, cy]],
+                }
+
+            return {
+                "shape_type": "circle",
+                "points": [
+                    [cx, cy],
+                    [cx + rx, cy],
+                    [cx, cy + ry],
+                    [cx - rx, cy],
+                    [cx, cy - ry],
+                ],
+            }
+        except cv2.error:
+            # Fall back to circle fitting below.
+            pass
+
+    circle = _fit_circle_least_squares(pts)
+    if circle is None:
+        raise ValueError("Failed to fit circle/ellipse from points")
+    cx, cy, r = circle
+    return {"shape_type": "circle", "points": [[cx, cy], [cx + r, cy]]}
 
 
 def get_conversion_params(self, mode: str):

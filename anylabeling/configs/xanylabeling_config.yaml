@@ -152,6 +152,7 @@ shortcuts:
   create_rotation: O
   create_quadrilateral: T
   create_circle: null
+  create_circle_fit: null
   create_line: null
   create_point: null
   create_linestrip: null

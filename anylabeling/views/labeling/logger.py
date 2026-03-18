@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 from functools import wraps
 from typing import Callable, Dict
@@ -60,10 +61,18 @@ class AppLogger:
     def __init__(self, name="X-AnyLabeling"):
         self.logger = logging.getLogger(name)
         self.logger.propagate = False
+        self._fallback_stream = None
         self._setup_handler()
 
     def _setup_handler(self):
-        stream_handler = logging.StreamHandler(sys.stderr)
+        stream = sys.stderr
+        if stream is None:
+            self._fallback_stream = open(
+                os.devnull, "w", encoding="utf-8", buffering=1
+            )
+            stream = self._fallback_stream
+
+        stream_handler = logging.StreamHandler(stream)
         handler_format = ColoredFormatter(
             "%(asctime)s | %(levelname2)s | %(module2)s:%(funcName2)s:%(lineno2)s - %(message2)s"
         )

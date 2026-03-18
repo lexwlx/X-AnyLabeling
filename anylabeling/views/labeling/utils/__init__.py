@@ -52,6 +52,7 @@ from .shape import (
     polygons_to_mask,
     shape_to_mask,
     shapes_to_label,
+    fit_circle_or_ellipse,
     rectangle_from_diagonal,
     shape_conversion,
 )

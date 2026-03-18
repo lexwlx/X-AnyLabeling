@@ -1,9 +1,13 @@
 import unittest
+import math
 
 from PyQt5 import QtCore
 
 from anylabeling.views.labeling.shape import Shape
-from anylabeling.views.labeling.utils.shape import shape_to_mask
+from anylabeling.views.labeling.utils.shape import (
+    shape_to_mask,
+    fit_circle_or_ellipse,
+)
 
 
 class TestCircleEllipse(unittest.TestCase):
@@ -91,3 +95,42 @@ class TestCircleEllipse(unittest.TestCase):
         )
         self.assertTrue(mask[50, 99])
         self.assertFalse(mask[5, 5])
+
+    def test_fit_circle_or_ellipse_returns_circle(self):
+        # Four points sampled from a circle should return the legacy 2-point circle.
+        points = [
+            [70.0, 50.0],
+            [50.0, 70.0],
+            [30.0, 50.0],
+            [50.0, 30.0],
+        ]
+        fitted = fit_circle_or_ellipse(points)
+        self.assertEqual(fitted["shape_type"], "circle")
+        self.assertEqual(len(fitted["points"]), 2)
+        center, edge = fitted["points"]
+        self.assertAlmostEqual(center[0], 50.0, places=1)
+        self.assertAlmostEqual(center[1], 50.0, places=1)
+        radius = math.hypot(edge[0] - center[0], edge[1] - center[1])
+        self.assertAlmostEqual(radius, 20.0, places=1)
+
+    def test_fit_circle_or_ellipse_returns_ellipse(self):
+        # More points sampled from an ellipse should return the 5-point format.
+        points = [
+            [80.0, 50.0],
+            [71.2, 60.6],
+            [50.0, 65.0],
+            [28.8, 60.6],
+            [20.0, 50.0],
+            [28.8, 39.4],
+            [50.0, 35.0],
+            [71.2, 39.4],
+        ]
+        fitted = fit_circle_or_ellipse(points)
+        self.assertEqual(fitted["shape_type"], "circle")
+        self.assertEqual(len(fitted["points"]), 5)
+        center = fitted["points"][0]
+        right = fitted["points"][1]
+        bottom = fitted["points"][2]
+        rx = abs(right[0] - center[0])
+        ry = abs(bottom[1] - center[1])
+        self.assertGreater(rx, ry)

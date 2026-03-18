@@ -206,6 +206,8 @@ class Canvas(
 
         # Brush drawing mode for polygon
         self._brush_drawing = False
+        # Multi-point circle/ellipse fitting mode (based on linestrip clicks)
+        self.circle_fit_mode = False
         self.brush_point_distance = self.brush_config.get(
             "point_distance", 25.0
         )
@@ -254,6 +256,10 @@ class Canvas(
     def set_fill_drawing(self, value):
         """Set shape filling option"""
         self._fill_drawing = value
+
+    def set_circle_fit_mode(self, enabled=False):
+        """Enable/disable multi-point circle/ellipse fitting mode."""
+        self.circle_fit_mode = enabled
 
     def _scaled_overlay_value(self, pixels: float) -> float:
         """Convert a screen-space size to canvas coordinates."""
@@ -1024,7 +1030,10 @@ class Canvas(
                             ev.modifiers()
                             == QtCore.Qt.KeyboardModifier.ControlModifier
                         ):
-                            self.finalise()
+                            if self.circle_fit_mode:
+                                self._finalise_circle_fit_shape()
+                            else:
+                                self.finalise()
                     # [Feature] support for automatically switching to editing mode
                     # when the cursor moves over an object
                     if (
@@ -1190,6 +1199,23 @@ class Canvas(
         """Check if a shape can be closed (number of points > 2)"""
         return self.drawing() and self.current and len(self.current) > 2
 
+    def _finalise_circle_fit_shape(self):
+        """Convert current clicked points to a fitted circle/ellipse and finalise."""
+        if not self.current:
+            return
+
+        raw_points = [[p.x(), p.y()] for p in self.current.points]
+        try:
+            fitted = utils.fit_circle_or_ellipse(raw_points)
+        except ValueError:
+            return
+
+        self.current.shape_type = fitted["shape_type"]
+        self.current.points = [
+            QtCore.QPointF(x, y) for x, y in fitted["points"]
+        ]
+        self.finalise()
+
     # QT Overload
     def mouseDoubleClickEvent(self, ev):
         """Mouse double click event"""
@@ -1235,7 +1261,10 @@ class Canvas(
         # so we keep it and finalize directly.
         if self.double_click == "close" and self.can_close_shape():
             if self.create_mode == "linestrip":
-                self.finalise()
+                if self.circle_fit_mode:
+                    self._finalise_circle_fit_shape()
+                else:
+                    self.finalise()
             elif len(self.current) > 3:
                 self.current.pop_point()
                 self.finalise()
@@ -2729,7 +2758,10 @@ class Canvas(
                         self.drawing_polygon.emit(False)
                         self.update()
             elif key == QtCore.Qt.Key.Key_Return and self.can_close_shape():
-                self.finalise()
+                if self.circle_fit_mode and self.create_mode == "linestrip":
+                    self._finalise_circle_fit_shape()
+                else:
+                    self.finalise()
             elif modifiers == QtCore.Qt.KeyboardModifier.AltModifier:
                 self.snapping = False
         elif self.editing():
