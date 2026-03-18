@@ -603,6 +603,28 @@ class LabelingWidget(LabelDialog):
             self.tr("Start drawing polygons"),
             enabled=False,
         )
+        create_contour_mode = action(
+            self.tr("Create Contour"),
+            lambda: self.toggle_draw_mode(False, create_mode="contour"),
+            shortcuts["create_contour"],
+            "polygon",
+            self.tr(
+                "Draw a closed contour with line and arc segments. Tab toggles the next segment type; C selects arc and L selects line."
+            ),
+            enabled=False,
+        )
+        contour_icon_path = osp.abspath(
+            osp.join(
+                osp.dirname(__file__),
+                "..",
+                "..",
+                "resources",
+                "images",
+                "contour.svg",
+            )
+        )
+        if osp.exists(contour_icon_path):
+            create_contour_mode.setIcon(QtGui.QIcon(contour_icon_path))
         create_brush_polygon_mode = action(
             self.tr("Create Brush Polygons"),
             self.toggle_brush_polygon_mode,
@@ -1624,6 +1646,7 @@ class LabelingWidget(LabelDialog):
             undo=undo,
             remove_point=remove_point,
             create_mode=create_mode,
+            create_contour_mode=create_contour_mode,
             create_brush_polygon_mode=create_brush_polygon_mode,
             edit_mode=edit_mode,
             create_rectangle_mode=create_rectangle_mode,
@@ -1747,6 +1770,7 @@ class LabelingWidget(LabelDialog):
             # menu shown at right click
             menu=(
                 create_mode,
+                create_contour_mode,
                 create_brush_polygon_mode,
                 create_rectangle_mode,
                 create_rotation_mode,
@@ -1771,6 +1795,7 @@ class LabelingWidget(LabelDialog):
             on_load_active=(
                 close,
                 create_mode,
+                create_contour_mode,
                 create_brush_polygon_mode,
                 create_rectangle_mode,
                 create_rotation_mode,
@@ -2010,6 +2035,7 @@ class LabelingWidget(LabelDialog):
             delete_file,
             None,
             create_mode,
+            self.actions.create_contour_mode,
             self.actions.create_brush_polygon_mode,
             self.actions.create_rectangle_mode,
             self.actions.create_rotation_mode,
@@ -2558,6 +2584,7 @@ class LabelingWidget(LabelDialog):
         self.menus.edit.clear()
         actions = (
             self.actions.create_mode,
+            self.actions.create_contour_mode,
             self.actions.create_brush_polygon_mode,
             self.actions.create_rectangle_mode,
             self.actions.create_rotation_mode,
@@ -2622,6 +2649,7 @@ class LabelingWidget(LabelDialog):
         self.actions.save.setEnabled(False)
         self.actions.union_selection.setEnabled(False)
         self.actions.create_mode.setEnabled(True)
+        self.actions.create_contour_mode.setEnabled(True)
         self.actions.create_brush_polygon_mode.setEnabled(True)
         self.actions.create_rectangle_mode.setEnabled(True)
         self.actions.create_rotation_mode.setEnabled(True)
@@ -3143,15 +3171,23 @@ class LabelingWidget(LabelDialog):
         if not edit:
             self.set_text_editing(False)
 
+        contour_mode = create_mode == "contour"
         circle_fit_mode = create_mode == "circle_fit"
-        canvas_mode = "linestrip" if circle_fit_mode else create_mode
+        if contour_mode:
+            canvas_mode = "polygon"
+        elif circle_fit_mode:
+            canvas_mode = "linestrip"
+        else:
+            canvas_mode = create_mode
 
         self.canvas.set_editing(edit)
         self.canvas.create_mode = canvas_mode
+        self.canvas.set_contour_mode(contour_mode)
         self.canvas.set_circle_fit_mode(circle_fit_mode)
         self.canvas._brush_drawing = False
         if edit:
             self.actions.create_mode.setEnabled(True)
+            self.actions.create_contour_mode.setEnabled(True)
             self.actions.create_brush_polygon_mode.setEnabled(True)
             self.actions.create_rectangle_mode.setEnabled(True)
             self.actions.create_rotation_mode.setEnabled(True)
@@ -3176,6 +3212,19 @@ class LabelingWidget(LabelDialog):
             self.actions.union_selection.setEnabled(False)
             if create_mode == "polygon":
                 self.actions.create_mode.setEnabled(False)
+                self.actions.create_contour_mode.setEnabled(True)
+                self.actions.create_brush_polygon_mode.setEnabled(True)
+                self.actions.create_rectangle_mode.setEnabled(True)
+                self.actions.create_rotation_mode.setEnabled(True)
+                self.actions.create_quadrilateral_mode.setEnabled(True)
+                self.actions.create_circle_mode.setEnabled(True)
+                self.actions.create_circle_fit_mode.setEnabled(True)
+                self.actions.create_line_mode.setEnabled(True)
+                self.actions.create_point_mode.setEnabled(True)
+                self.actions.create_line_strip_mode.setEnabled(True)
+            elif create_mode == "contour":
+                self.actions.create_mode.setEnabled(True)
+                self.actions.create_contour_mode.setEnabled(False)
                 self.actions.create_brush_polygon_mode.setEnabled(True)
                 self.actions.create_rectangle_mode.setEnabled(True)
                 self.actions.create_rotation_mode.setEnabled(True)
@@ -3187,6 +3236,7 @@ class LabelingWidget(LabelDialog):
                 self.actions.create_line_strip_mode.setEnabled(True)
             elif create_mode == "rectangle":
                 self.actions.create_mode.setEnabled(True)
+                self.actions.create_contour_mode.setEnabled(True)
                 self.actions.create_brush_polygon_mode.setEnabled(True)
                 self.actions.create_rectangle_mode.setEnabled(False)
                 self.actions.create_rotation_mode.setEnabled(True)
@@ -3198,6 +3248,7 @@ class LabelingWidget(LabelDialog):
                 self.actions.create_line_strip_mode.setEnabled(True)
             elif create_mode == "line":
                 self.actions.create_mode.setEnabled(True)
+                self.actions.create_contour_mode.setEnabled(True)
                 self.actions.create_brush_polygon_mode.setEnabled(True)
                 self.actions.create_rectangle_mode.setEnabled(True)
                 self.actions.create_rotation_mode.setEnabled(True)
@@ -3209,6 +3260,7 @@ class LabelingWidget(LabelDialog):
                 self.actions.create_line_strip_mode.setEnabled(True)
             elif create_mode == "point":
                 self.actions.create_mode.setEnabled(True)
+                self.actions.create_contour_mode.setEnabled(True)
                 self.actions.create_brush_polygon_mode.setEnabled(True)
                 self.actions.create_rectangle_mode.setEnabled(True)
                 self.actions.create_rotation_mode.setEnabled(True)
@@ -3220,6 +3272,7 @@ class LabelingWidget(LabelDialog):
                 self.actions.create_line_strip_mode.setEnabled(True)
             elif create_mode == "circle":
                 self.actions.create_mode.setEnabled(True)
+                self.actions.create_contour_mode.setEnabled(True)
                 self.actions.create_brush_polygon_mode.setEnabled(True)
                 self.actions.create_rectangle_mode.setEnabled(True)
                 self.actions.create_rotation_mode.setEnabled(True)
@@ -3231,6 +3284,7 @@ class LabelingWidget(LabelDialog):
                 self.actions.create_line_strip_mode.setEnabled(True)
             elif create_mode == "linestrip":
                 self.actions.create_mode.setEnabled(True)
+                self.actions.create_contour_mode.setEnabled(True)
                 self.actions.create_brush_polygon_mode.setEnabled(True)
                 self.actions.create_rectangle_mode.setEnabled(True)
                 self.actions.create_rotation_mode.setEnabled(True)
@@ -3242,6 +3296,7 @@ class LabelingWidget(LabelDialog):
                 self.actions.create_line_strip_mode.setEnabled(False)
             elif create_mode == "circle_fit":
                 self.actions.create_mode.setEnabled(True)
+                self.actions.create_contour_mode.setEnabled(True)
                 self.actions.create_brush_polygon_mode.setEnabled(True)
                 self.actions.create_rectangle_mode.setEnabled(True)
                 self.actions.create_rotation_mode.setEnabled(True)
@@ -3253,6 +3308,7 @@ class LabelingWidget(LabelDialog):
                 self.actions.create_line_strip_mode.setEnabled(True)
             elif create_mode == "rotation":
                 self.actions.create_mode.setEnabled(True)
+                self.actions.create_contour_mode.setEnabled(True)
                 self.actions.create_brush_polygon_mode.setEnabled(True)
                 self.actions.create_rectangle_mode.setEnabled(True)
                 self.actions.create_rotation_mode.setEnabled(False)
@@ -3264,6 +3320,7 @@ class LabelingWidget(LabelDialog):
                 self.actions.create_line_strip_mode.setEnabled(True)
             elif create_mode == "quadrilateral":
                 self.actions.create_mode.setEnabled(True)
+                self.actions.create_contour_mode.setEnabled(True)
                 self.actions.create_brush_polygon_mode.setEnabled(True)
                 self.actions.create_rectangle_mode.setEnabled(True)
                 self.actions.create_rotation_mode.setEnabled(True)

@@ -48,8 +48,10 @@ from .qt import (
     on_thumbnail_click,
 )
 from .shape import (
+    build_contour_polygon_points,
     masks_to_bboxes,
     polygons_to_mask,
+    sample_arc_points,
     shape_to_mask,
     shapes_to_label,
     fit_circle_or_ellipse,

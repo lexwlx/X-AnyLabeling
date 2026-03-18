@@ -147,6 +147,7 @@ shortcuts:
   show_navigator: F9
 
   create_polygon: P
+  create_contour: null
   create_brush_polygon: Ctrl+N
   create_rectangle: [R, Ctrl+R]
   create_rotation: O

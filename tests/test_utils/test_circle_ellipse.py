@@ -5,8 +5,10 @@ from PyQt5 import QtCore
 
 from anylabeling.views.labeling.shape import Shape
 from anylabeling.views.labeling.utils.shape import (
+    build_contour_polygon_points,
     shape_to_mask,
     fit_circle_or_ellipse,
+    sample_arc_points,
 )
 
 
@@ -134,3 +136,34 @@ class TestCircleEllipse(unittest.TestCase):
         rx = abs(right[0] - center[0])
         ry = abs(bottom[1] - center[1])
         self.assertGreater(rx, ry)
+
+    def test_sample_arc_points_preserves_endpoints_and_curvature(self):
+        sampled = sample_arc_points(
+            start=[0.0, 0.0],
+            mid=[1.0, 1.0],
+            end=[2.0, 0.0],
+            max_segment_length=0.4,
+        )
+        self.assertEqual(sampled[0], [0.0, 0.0])
+        self.assertEqual(sampled[-1], [2.0, 0.0])
+        self.assertGreater(len(sampled), 3)
+        self.assertGreater(max(point[1] for point in sampled), 0.9)
+
+    def test_build_contour_polygon_points_merges_line_and_arc(self):
+        polygon = build_contour_polygon_points(
+            anchor_points=[
+                [0.0, 0.0],
+                [2.0, 0.0],
+                [2.0, 2.0],
+                [0.0, 0.0],
+            ],
+            contour_segments=[
+                {"type": "line"},
+                {"type": "line"},
+                {"type": "arc", "mid": [0.5, 1.5]},
+            ],
+            max_segment_length=0.5,
+        )
+        self.assertEqual(polygon[0], [0.0, 0.0])
+        self.assertNotEqual(polygon[-1], [0.0, 0.0])
+        self.assertGreater(len(polygon), 4)

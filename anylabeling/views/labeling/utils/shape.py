@@ -126,6 +126,151 @@ def fit_circle_or_ellipse(points, circle_threshold=0.05):
     return {"shape_type": "circle", "points": [[cx, cy], [cx + r, cy]]}
 
 
+def _normalize_angle(angle):
+    """Normalize an angle to the [-pi, pi] range."""
+    return math.atan2(math.sin(angle), math.cos(angle))
+
+
+def _ccw_angle_delta(start_angle, end_angle):
+    """Return the counter-clockwise angle delta in [0, 2*pi)."""
+    delta = _normalize_angle(end_angle - start_angle)
+    if delta < 0:
+        delta += 2 * math.pi
+    return delta
+
+
+def sample_arc_points(start, mid, end, max_segment_length=8.0):
+    """Sample a circular arc defined by 3 points.
+
+    Args:
+        start (Sequence[float]): Arc start point.
+        mid (Sequence[float]): A point that lies on the desired arc.
+        end (Sequence[float]): Arc end point.
+        max_segment_length (float): Maximum distance between adjacent
+            sampled points.
+
+    Returns:
+        list[list[float]]: Sampled points including start and end. Falls
+        back to a straight segment when the 3 points are degenerate.
+    """
+    start = np.asarray(start, dtype=np.float64)
+    mid = np.asarray(mid, dtype=np.float64)
+    end = np.asarray(end, dtype=np.float64)
+
+    if start.shape != (2,) or mid.shape != (2,) or end.shape != (2,):
+        raise ValueError("Arc points must each be 2D coordinates")
+
+    x1, y1 = start
+    x2, y2 = mid
+    x3, y3 = end
+
+    temp = x2 * x2 + y2 * y2
+    bc = (x1 * x1 + y1 * y1 - temp) / 2.0
+    cd = (temp - x3 * x3 - y3 * y3) / 2.0
+    det = (x1 - x2) * (y2 - y3) - (x2 - x3) * (y1 - y2)
+
+    if abs(det) < 1e-6:
+        return [start.tolist(), end.tolist()]
+
+    cx = (bc * (y2 - y3) - cd * (y1 - y2)) / det
+    cy = ((x1 - x2) * cd - (x2 - x3) * bc) / det
+    center = np.asarray([cx, cy], dtype=np.float64)
+    radius = np.linalg.norm(start - center)
+
+    if radius <= 1e-6:
+        return [start.tolist(), end.tolist()]
+
+    start_angle = math.atan2(y1 - cy, x1 - cx)
+    mid_angle = math.atan2(y2 - cy, x2 - cx)
+    end_angle = math.atan2(y3 - cy, x3 - cx)
+
+    ccw_total = _ccw_angle_delta(start_angle, end_angle)
+    ccw_mid = _ccw_angle_delta(start_angle, mid_angle)
+
+    use_ccw = ccw_mid <= ccw_total + 1e-6
+    total_angle = ccw_total if use_ccw else (2 * math.pi - ccw_total)
+
+    if total_angle <= 1e-6:
+        return [start.tolist(), end.tolist()]
+
+    arc_length = radius * total_angle
+    segment_count = max(
+        2,
+        int(math.ceil(arc_length / max(1.0, float(max_segment_length)))),
+    )
+
+    samples = []
+    for i in range(segment_count + 1):
+        t = i / segment_count
+        angle = (
+            start_angle + total_angle * t
+            if use_ccw
+            else start_angle - total_angle * t
+        )
+        samples.append(
+            [
+                float(cx + radius * math.cos(angle)),
+                float(cy + radius * math.sin(angle)),
+            ]
+        )
+
+    samples[0] = start.tolist()
+    samples[-1] = end.tolist()
+    return samples
+
+
+def build_contour_polygon_points(
+    anchor_points, contour_segments, max_segment_length=8.0
+):
+    """Convert a mixed line/arc contour into polygon vertices.
+
+    Args:
+        anchor_points (Sequence[Sequence[float]]): Contour anchor points.
+        contour_segments (Sequence[dict]): Segment metadata. Segment `i`
+            connects anchor `i` to anchor `i+1`. Supported types:
+            `{"type": "line"}` and `{"type": "arc", "mid": [x, y]}`.
+        max_segment_length (float): Maximum spacing for sampled arc points.
+
+    Returns:
+        list[list[float]]: Polygon points suitable for a single shape.
+    """
+    if not anchor_points:
+        return []
+
+    anchors = [np.asarray(point, dtype=np.float64) for point in anchor_points]
+    if len(anchors) == 1:
+        return [anchors[0].tolist()]
+
+    if len(contour_segments) != len(anchors) - 1:
+        raise ValueError("Contour segments must connect consecutive anchors")
+
+    polygon_points = [anchors[0].tolist()]
+    for index, segment in enumerate(contour_segments):
+        start = anchors[index]
+        end = anchors[index + 1]
+        segment_type = segment.get("type", "line")
+
+        if segment_type == "arc" and segment.get("mid") is not None:
+            sampled = sample_arc_points(
+                start,
+                segment["mid"],
+                end,
+                max_segment_length=max_segment_length,
+            )
+        else:
+            sampled = [start.tolist(), end.tolist()]
+
+        polygon_points.extend(sampled[1:])
+
+    if len(polygon_points) > 1:
+        start = np.asarray(polygon_points[0], dtype=np.float64)
+        end = np.asarray(polygon_points[-1], dtype=np.float64)
+        if np.linalg.norm(start - end) <= 1e-6:
+            polygon_points.pop()
+
+    return polygon_points
+
+
 def get_conversion_params(self, mode: str):
     """Get parameters required for specific conversion modes.
 
