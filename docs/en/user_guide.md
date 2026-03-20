@@ -185,6 +185,7 @@ In X-AnyLabeling, each distinct annotated object is called a `shape`. Key proper
 | `flags`       | Dictionary | Dictionary for additional flags or attributes. `null` if none.      |
 | `attributes`  | Dictionary | Dictionary for custom object attributes. Empty `{}` if none.      |
 | `kie_linking` | List    | Information linking shapes (e.g., for Key Info Extraction). Empty `[]` if none. |
+| `cuboid3d`    | Dictionary | Cuboid-only metadata for 3D projection in 2D, including `version`, `mode`, `vertices2d_order`, `depth_vector`, and `source`. |
 
 For detailed field definitions, see [`shape.py`](../../anylabeling/views/labeling/shape.py).
 
@@ -198,6 +199,7 @@ X-AnyLabeling supports creating the following types of shapes:
 - **Line**: Click to set the start point, move the cursor, and click again to set the end point. Hold `Shift` while drawing to snap the segment horizontally or vertically.
 - **Line Strip**: Click to place the first point, then click to add subsequent points for connected line segments. Hold `Shift` while drawing each segment to snap it horizontally or vertically. Double-click to finish.
 - **Circle**: Click to set the center, move the cursor to define the radius, and click again.
+- **Cuboid** (`Ctrl+R`): Draw the front face as a rectangle (same gesture as rectangle creation). The rear face is auto-generated using `canvas.cuboid.default_depth_vector`; if depth is too small, it is normalized to satisfy `canvas.cuboid.min_depth`.
 
 You can create shapes using the tools in the left toolbar, the right-click context menu, or keyboard shortcuts.
 
@@ -213,6 +215,7 @@ Press `Ctrl+J` to quickly switch between Drawing and Editing modes. Additional o
 - **Rectangles**: You can drag a rectangle's corner handles to resize it, or select multiple rectangles and merge them using the right-click menu. Mouse wheel editing is also supported; when enabled via the `wheel_rectangle_editing` setting, scrolling inside the rectangle scales it, while scrolling outside adjusts the nearest edge. Note: wheel rectangle editing is automatically disabled when `auto_highlight_shape` is enabled.
 - **Polygons**: In Editing Mode, dragging an edge adds a new vertex, and holding `Shift` while clicking a vertex removes it. Polygons also support merging via the right-click menu.
 - **Rotated Rectangles**: Select a rotated rectangle and press `Z`, `X`, `C`, or `V` to rotate it in different directions. A real-time display of the rotation angle is available via the View menu.
+- **Cuboid**: In Edit Mode, cuboid controls include 11 visible handles: 4 front vertices, 4 front edge centers, 2 visible rear vertices, and 1 visible rear edge center (depth handle). Dragging the front face moves the whole cuboid. Dragging the left/right/back faces adjusts geometry. Dragging rear visible vertices adjusts vertical alignment of top/bottom planes, while dragging the rear center adjusts depth with geometric constraints. The visible rear side is determined automatically from the depth vector direction.
 
 Additionally, you can quickly copy the coordinates of any selected shape to your clipboard using the **Copy Coordinates** option from the right-click context menu. For rectangles, this outputs the format `[x1, y1, x2, y2]` (top-left and bottom-right corners), while other shape types output `[x1, y1, x2, y2, x3, y3, ...]` (all vertex coordinates). In Editing Mode, double-clicking a shape on the canvas opens the label editor; you can disable this via the `double_click_edit_label` canvas setting (default: true).
 
@@ -251,6 +254,12 @@ The following search modes are currently supported:
 **Text Search**
 
 Enter plain text directly, and the system will search for files whose names contain that text. For example, entering `test` will find all images with "test" in their filename.
+
+**Index Search**
+
+Use the `#N` format to target an image by index, where `N` must be a positive integer. Examples:
+- `#1` targets the 1st image in the current file list
+- `#10` targets the 10th image in the current file list
 
 **Regular Expression Search**
 
@@ -636,14 +645,25 @@ The cropped image saving function can be implemented through the following steps
 
 ### 5.4 Shape Type Conversion
 
-You can convert between certain shape types using the `Tools` menu. Supported conversions include:
+X-AnyLabeling provides a unified **Shape Converter**.
+Open it from **Tools -> Shape Converter**, then select a source shape type and a target shape type to run batch conversion.
 
-- **Rectangle to Rotated Box**
-- **Rotated Box to Rectangle**
-- **Polygon to Bounding Box**
-- **Polygon to Rotated Box**
+Currently supported conversion mappings:
 
-> **Note:** Converting *to* Rectangle or Bounding Box uses the axis-aligned bounding box, losing rotation or precise boundary information. This conversion is **irreversible** within the tool, so use it carefully.
+- `polygon` -> `rectangle`, `rotation`
+- `rectangle` -> `rotation`, `polygon`, `circle`, `quadrilateral`
+- `rotation` -> `rectangle`, `quadrilateral`, `polygon`, `circle`
+- `line` -> `linestrip`
+- `circle` -> `rectangle`, `rotation`, `quadrilateral`, `polygon`
+- `quadrilateral` -> `polygon`
+
+Rules:
+
+- Conversions *to* `circle` use an **inscribed-circle** strategy.
+- `polygon`/`rotation` -> `rectangle` uses an axis-aligned bounding box (AABB).
+- `circle` -> `rectangle`/`rotation`/`quadrilateral` generates a four-point shape from circle center and radius.
+
+> **Note:** Some conversions are lossy (e.g., rotation angle, exact boundaries, curve details) and are **irreversible**. Back up annotations before large batch conversions.
 
 ### 5.5 Digit Shortcut Manager
 
@@ -656,7 +676,7 @@ To open the Digit Shortcut Manager, select **Tools** in the top menu bar of the 
 In the Digit Shortcut Manager dialog, users can see a table containing all numeric keys (0-9), with each row including the following information:
 
 - **Digit**: Represents the numeric key (0-9) on the keyboard
-- **Drawing Mode**: Choose the type of shape to draw from the dropdown menu, including rectangle, polygon, rotation, quadrilateral, circle, line, point, linestrip, or none
+- **Drawing Mode**: Choose the type of shape to draw from the dropdown menu, including rectangle, cuboid, polygon, rotation, quadrilateral, circle, line, point, linestrip, or none
 - **Label**: Specify the default label name for the shape (required)
 
 **Configuring Shortcuts**: Select the drawing mode corresponding to the digit, enter the default label name for that shape (required when a drawing mode is enabled), then click **OK** to save the settings.
@@ -748,6 +768,7 @@ The default keyboard shortcuts are listed below. You can customize these in the 
 | `Ctrl+n`              | Create Brush Polygon                             | Toggle brush mode for polygon drawing      |
 | `o`                   | Create Rotated Rectangle Shape                   | Shortcut might vary                        |
 | `r`                   | Create Rectangle Shape                           | Shortcut might vary                        |
+| `Ctrl+r`              | Create Cuboid Shape                              | From rectangle                             |
 | `t`                   | Create Quadrilateral Shape                       | Shortcut might vary                        |
 | `i`                   | Run AI Model Inference                           | If model loaded                            |
 | `q`                   | Add Positive Point (SAM)                         | SAM Interactive Segmentation Mode          |

@@ -106,7 +106,17 @@ def export_yolo_annotation(self, mode):
         )
         if not self.yaml_file:
             return
-        converter = LabelConverter(pose_cfg_file=self.yaml_file)
+        try:
+            converter = LabelConverter(pose_cfg_file=self.yaml_file)
+        except Exception as e:
+            logger.error(f"Failed to load pose config: {self.yaml_file}: {e}")
+            popup = Popup(
+                self.tr("Invalid pose config file:\n%s") % str(e),
+                self,
+                icon=new_icon_path("error", "svg"),
+            )
+            popup.show_popup(self, popup_height=65, position="center")
+            return
 
     elif mode in ["hbb", "obb", "seg"]:
         filter = "Classes Files (*.txt);;All Files (*)"
@@ -502,7 +512,17 @@ def export_coco_annotation(self, mode):
         )
         if not self.yaml_file:
             return
-        converter = LabelConverter(pose_cfg_file=self.yaml_file)
+        try:
+            converter = LabelConverter(pose_cfg_file=self.yaml_file)
+        except Exception as e:
+            logger.error(f"Failed to load pose config: {self.yaml_file}: {e}")
+            popup = Popup(
+                self.tr("Invalid pose config file:\n%s") % str(e),
+                self,
+                icon=new_icon_path("error", "svg"),
+            )
+            popup.show_popup(self, popup_height=65, position="center")
+            return
     elif mode in ["rectangle", "polygon"]:
         filter = "Classes Files (*.txt);;All Files (*)"
         self.classes_file, _ = QtWidgets.QFileDialog.getOpenFileName(
@@ -1020,16 +1040,18 @@ def export_mot_annotation(self, mode):
     if not _check_filename_exist(self):
         return
 
-    filter = "Classes Files (*.txt);;All Files (*)"
-    self.classes_file, _ = QtWidgets.QFileDialog.getOpenFileName(
-        self,
-        self.tr("Select a specific classes file"),
-        "",
-        filter,
-    )
-    if not self.classes_file:
-        return
-    converter = LabelConverter(classes_file=self.classes_file)
+    converter = LabelConverter()
+    if mode in ["mot", "mots", "odvg"]:
+        filter = "Classes Files (*.txt);;All Files (*)"
+        self.classes_file, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            self.tr("Select a specific classes file"),
+            "",
+            filter,
+        )
+        if not self.classes_file:
+            return
+        converter = LabelConverter(classes_file=self.classes_file)
 
     dialog = QtWidgets.QDialog(self)
     dialog.setWindowTitle(self.tr("Export options"))

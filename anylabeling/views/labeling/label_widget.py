@@ -28,7 +28,6 @@ from PyQt6.QtWidgets import (
     QRadioButton,
     QScrollArea,
     QVBoxLayout,
-    QWhatsThis,
     QWidget,
     QLineEdit,
 )
@@ -254,6 +253,7 @@ class LabelingWidget(LabelDialog):
             self.tr(
                 "Supported search modes:\n"
                 "- Text: plain text search\n"
+                "- Index: #N (e.g., #1, #10)\n"
                 "- Regex: <pattern> (e.g., <\\.png$>)\n"
                 "- Attributes: difficult::1, gid::0, shape::1, label::xxx, type::xxx\n"
                 "- Score range: score::[0,0.5], score::(0,0.6], score::[0,0.6), score::(0,0.6)\n"
@@ -315,6 +315,7 @@ class LabelingWidget(LabelDialog):
             rotation=self._config["canvas"].get("rotation", {}),
             mask=self._config["canvas"].get("mask", {}),
             brush=self._config["canvas"].get("brush", {}),
+            cuboid=self._config["canvas"].get("cuboid", {}),
             double_click_edit_label=self._config["canvas"].get(
                 "double_click_edit_label", True
             ),
@@ -699,6 +700,14 @@ class LabelingWidget(LabelDialog):
             self.tr("Start drawing linestrip. Ctrl+LeftClick ends creation."),
             enabled=False,
         )
+        create_cuboid_mode = action(
+            self.tr("Create Cuboid"),
+            lambda: self.toggle_draw_mode(False, create_mode="cuboid"),
+            shortcuts.get("create_cuboid"),
+            "cuboid",
+            self.tr("Start drawing cuboids from rectangle"),
+            enabled=False,
+        )
         digit_shortcut_0 = action(
             self.tr("Digit Shortcut 0"),
             lambda: self.create_digit_mode(0),
@@ -931,45 +940,11 @@ class LabelingWidget(LabelDialog):
             tip=self.tr("Union multiple selected rectangle shapes"),
             enabled=False,
         )
-        hbb_to_obb = action(
-            self.tr("Convert HBB to OBB"),
-            lambda: utils.shape_conversion(self, "hbb_to_obb"),
+        shape_converter = action(
+            self.tr("Shape Converter"),
+            lambda: utils.open_shape_converter(self),
             icon="convert",
-            tip=self.tr(
-                "Perform conversion from horizontal bounding box to oriented bounding box"
-            ),
-        )
-        obb_to_hbb = action(
-            self.tr("Convert OBB to HBB"),
-            lambda: utils.shape_conversion(self, "obb_to_hbb"),
-            icon="convert",
-            tip=self.tr(
-                "Perform conversion from oriented bounding box to horizontal bounding box"
-            ),
-        )
-        polygon_to_hbb = action(
-            self.tr("Convert Polygon to HBB"),
-            lambda: utils.shape_conversion(self, "polygon_to_hbb"),
-            icon="convert",
-            tip=self.tr(
-                "Perform conversion from polygon to horizontal bounding box"
-            ),
-        )
-        polygon_to_obb = action(
-            self.tr("Convert Polygon to OBB"),
-            lambda: utils.shape_conversion(self, "polygon_to_obb"),
-            icon="convert",
-            tip=self.tr(
-                "Perform conversion from polygon to oriented bounding box"
-            ),
-        )
-        circle_to_polygon = action(
-            self.tr("Convert Circle to Polygon"),
-            lambda: utils.shape_conversion(self, "circle_to_polygon"),
-            icon="convert",
-            tip=self.tr(
-                "Perform conversion from circle to polygon with user-specified points"
-            ),
+            tip=self.tr("Open shape converter"),
         )
         open_chatbot = action(
             self.tr("ChatBot"),
@@ -1650,6 +1625,7 @@ class LabelingWidget(LabelDialog):
             create_brush_polygon_mode=create_brush_polygon_mode,
             edit_mode=edit_mode,
             create_rectangle_mode=create_rectangle_mode,
+            create_cuboid_mode=create_cuboid_mode,
             create_rotation_mode=create_rotation_mode,
             create_quadrilateral_mode=create_quadrilateral_mode,
             create_circle_mode=create_circle_mode,
@@ -1773,6 +1749,7 @@ class LabelingWidget(LabelDialog):
                 create_contour_mode,
                 create_brush_polygon_mode,
                 create_rectangle_mode,
+                create_cuboid_mode,
                 create_rotation_mode,
                 create_quadrilateral_mode,
                 create_circle_mode,
@@ -1798,6 +1775,7 @@ class LabelingWidget(LabelDialog):
                 create_contour_mode,
                 create_brush_polygon_mode,
                 create_rectangle_mode,
+                create_cuboid_mode,
                 create_rotation_mode,
                 create_quadrilateral_mode,
                 create_circle_mode,
@@ -1884,11 +1862,7 @@ class LabelingWidget(LabelDialog):
                 gid_manager,
                 shape_manager,
                 None,
-                hbb_to_obb,
-                obb_to_hbb,
-                polygon_to_hbb,
-                polygon_to_obb,
-                circle_to_polygon,
+                shape_converter,
             ),
         )
         utils.add_actions(
@@ -2038,6 +2012,7 @@ class LabelingWidget(LabelDialog):
             self.actions.create_contour_mode,
             self.actions.create_brush_polygon_mode,
             self.actions.create_rectangle_mode,
+            self.actions.create_cuboid_mode,
             self.actions.create_rotation_mode,
             self.actions.create_quadrilateral_mode,
             self.actions.create_circle_mode,
@@ -2587,6 +2562,7 @@ class LabelingWidget(LabelDialog):
             self.actions.create_contour_mode,
             self.actions.create_brush_polygon_mode,
             self.actions.create_rectangle_mode,
+            self.actions.create_cuboid_mode,
             self.actions.create_rotation_mode,
             self.actions.create_quadrilateral_mode,
             self.actions.create_circle_mode,
@@ -2652,6 +2628,7 @@ class LabelingWidget(LabelDialog):
         self.actions.create_contour_mode.setEnabled(True)
         self.actions.create_brush_polygon_mode.setEnabled(True)
         self.actions.create_rectangle_mode.setEnabled(True)
+        self.actions.create_cuboid_mode.setEnabled(True)
         self.actions.create_rotation_mode.setEnabled(True)
         self.actions.create_quadrilateral_mode.setEnabled(True)
         self.actions.create_circle_mode.setEnabled(True)
@@ -3190,6 +3167,7 @@ class LabelingWidget(LabelDialog):
             self.actions.create_contour_mode.setEnabled(True)
             self.actions.create_brush_polygon_mode.setEnabled(True)
             self.actions.create_rectangle_mode.setEnabled(True)
+            self.actions.create_cuboid_mode.setEnabled(True)
             self.actions.create_rotation_mode.setEnabled(True)
             self.actions.create_quadrilateral_mode.setEnabled(True)
             self.actions.create_circle_mode.setEnabled(True)
@@ -3210,128 +3188,34 @@ class LabelingWidget(LabelDialog):
         else:
             self.hide_attributes_panel()
             self.actions.union_selection.setEnabled(False)
-            if create_mode == "polygon":
-                self.actions.create_mode.setEnabled(False)
-                self.actions.create_contour_mode.setEnabled(True)
-                self.actions.create_brush_polygon_mode.setEnabled(True)
-                self.actions.create_rectangle_mode.setEnabled(True)
-                self.actions.create_rotation_mode.setEnabled(True)
-                self.actions.create_quadrilateral_mode.setEnabled(True)
-                self.actions.create_circle_mode.setEnabled(True)
-                self.actions.create_circle_fit_mode.setEnabled(True)
-                self.actions.create_line_mode.setEnabled(True)
-                self.actions.create_point_mode.setEnabled(True)
-                self.actions.create_line_strip_mode.setEnabled(True)
-            elif create_mode == "contour":
-                self.actions.create_mode.setEnabled(True)
-                self.actions.create_contour_mode.setEnabled(False)
-                self.actions.create_brush_polygon_mode.setEnabled(True)
-                self.actions.create_rectangle_mode.setEnabled(True)
-                self.actions.create_rotation_mode.setEnabled(True)
-                self.actions.create_quadrilateral_mode.setEnabled(True)
-                self.actions.create_circle_mode.setEnabled(True)
-                self.actions.create_circle_fit_mode.setEnabled(True)
-                self.actions.create_line_mode.setEnabled(True)
-                self.actions.create_point_mode.setEnabled(True)
-                self.actions.create_line_strip_mode.setEnabled(True)
-            elif create_mode == "rectangle":
-                self.actions.create_mode.setEnabled(True)
-                self.actions.create_contour_mode.setEnabled(True)
-                self.actions.create_brush_polygon_mode.setEnabled(True)
-                self.actions.create_rectangle_mode.setEnabled(False)
-                self.actions.create_rotation_mode.setEnabled(True)
-                self.actions.create_quadrilateral_mode.setEnabled(True)
-                self.actions.create_circle_mode.setEnabled(True)
-                self.actions.create_circle_fit_mode.setEnabled(True)
-                self.actions.create_line_mode.setEnabled(True)
-                self.actions.create_point_mode.setEnabled(True)
-                self.actions.create_line_strip_mode.setEnabled(True)
-            elif create_mode == "line":
-                self.actions.create_mode.setEnabled(True)
-                self.actions.create_contour_mode.setEnabled(True)
-                self.actions.create_brush_polygon_mode.setEnabled(True)
-                self.actions.create_rectangle_mode.setEnabled(True)
-                self.actions.create_rotation_mode.setEnabled(True)
-                self.actions.create_quadrilateral_mode.setEnabled(True)
-                self.actions.create_circle_mode.setEnabled(True)
-                self.actions.create_circle_fit_mode.setEnabled(True)
-                self.actions.create_line_mode.setEnabled(False)
-                self.actions.create_point_mode.setEnabled(True)
-                self.actions.create_line_strip_mode.setEnabled(True)
-            elif create_mode == "point":
-                self.actions.create_mode.setEnabled(True)
-                self.actions.create_contour_mode.setEnabled(True)
-                self.actions.create_brush_polygon_mode.setEnabled(True)
-                self.actions.create_rectangle_mode.setEnabled(True)
-                self.actions.create_rotation_mode.setEnabled(True)
-                self.actions.create_quadrilateral_mode.setEnabled(True)
-                self.actions.create_circle_mode.setEnabled(True)
-                self.actions.create_circle_fit_mode.setEnabled(True)
-                self.actions.create_line_mode.setEnabled(True)
-                self.actions.create_point_mode.setEnabled(False)
-                self.actions.create_line_strip_mode.setEnabled(True)
-            elif create_mode == "circle":
-                self.actions.create_mode.setEnabled(True)
-                self.actions.create_contour_mode.setEnabled(True)
-                self.actions.create_brush_polygon_mode.setEnabled(True)
-                self.actions.create_rectangle_mode.setEnabled(True)
-                self.actions.create_rotation_mode.setEnabled(True)
-                self.actions.create_quadrilateral_mode.setEnabled(True)
-                self.actions.create_circle_mode.setEnabled(False)
-                self.actions.create_circle_fit_mode.setEnabled(True)
-                self.actions.create_line_mode.setEnabled(True)
-                self.actions.create_point_mode.setEnabled(True)
-                self.actions.create_line_strip_mode.setEnabled(True)
-            elif create_mode == "linestrip":
-                self.actions.create_mode.setEnabled(True)
-                self.actions.create_contour_mode.setEnabled(True)
-                self.actions.create_brush_polygon_mode.setEnabled(True)
-                self.actions.create_rectangle_mode.setEnabled(True)
-                self.actions.create_rotation_mode.setEnabled(True)
-                self.actions.create_quadrilateral_mode.setEnabled(True)
-                self.actions.create_circle_mode.setEnabled(True)
-                self.actions.create_circle_fit_mode.setEnabled(True)
-                self.actions.create_line_mode.setEnabled(True)
-                self.actions.create_point_mode.setEnabled(True)
-                self.actions.create_line_strip_mode.setEnabled(False)
-            elif create_mode == "circle_fit":
-                self.actions.create_mode.setEnabled(True)
-                self.actions.create_contour_mode.setEnabled(True)
-                self.actions.create_brush_polygon_mode.setEnabled(True)
-                self.actions.create_rectangle_mode.setEnabled(True)
-                self.actions.create_rotation_mode.setEnabled(True)
-                self.actions.create_quadrilateral_mode.setEnabled(True)
-                self.actions.create_circle_mode.setEnabled(True)
-                self.actions.create_circle_fit_mode.setEnabled(False)
-                self.actions.create_line_mode.setEnabled(True)
-                self.actions.create_point_mode.setEnabled(True)
-                self.actions.create_line_strip_mode.setEnabled(True)
-            elif create_mode == "rotation":
-                self.actions.create_mode.setEnabled(True)
-                self.actions.create_contour_mode.setEnabled(True)
-                self.actions.create_brush_polygon_mode.setEnabled(True)
-                self.actions.create_rectangle_mode.setEnabled(True)
-                self.actions.create_rotation_mode.setEnabled(False)
-                self.actions.create_quadrilateral_mode.setEnabled(True)
-                self.actions.create_circle_mode.setEnabled(True)
-                self.actions.create_circle_fit_mode.setEnabled(True)
-                self.actions.create_line_mode.setEnabled(True)
-                self.actions.create_point_mode.setEnabled(True)
-                self.actions.create_line_strip_mode.setEnabled(True)
-            elif create_mode == "quadrilateral":
-                self.actions.create_mode.setEnabled(True)
-                self.actions.create_contour_mode.setEnabled(True)
-                self.actions.create_brush_polygon_mode.setEnabled(True)
-                self.actions.create_rectangle_mode.setEnabled(True)
-                self.actions.create_rotation_mode.setEnabled(True)
-                self.actions.create_quadrilateral_mode.setEnabled(False)
-                self.actions.create_circle_mode.setEnabled(True)
-                self.actions.create_circle_fit_mode.setEnabled(True)
-                self.actions.create_line_mode.setEnabled(True)
-                self.actions.create_point_mode.setEnabled(True)
-                self.actions.create_line_strip_mode.setEnabled(True)
-            else:
+            create_actions = {
+                "polygon": self.actions.create_mode,
+                "contour": self.actions.create_contour_mode,
+                "rectangle": self.actions.create_rectangle_mode,
+                "cuboid": self.actions.create_cuboid_mode,
+                "line": self.actions.create_line_mode,
+                "point": self.actions.create_point_mode,
+                "circle": self.actions.create_circle_mode,
+                "linestrip": self.actions.create_line_strip_mode,
+                "circle_fit": self.actions.create_circle_fit_mode,
+                "rotation": self.actions.create_rotation_mode,
+                "quadrilateral": self.actions.create_quadrilateral_mode,
+            }
+            if create_mode not in create_actions:
                 raise ValueError(f"Unsupported create_mode: {create_mode}")
+            self.actions.create_mode.setEnabled(True)
+            self.actions.create_contour_mode.setEnabled(True)
+            self.actions.create_brush_polygon_mode.setEnabled(True)
+            self.actions.create_rectangle_mode.setEnabled(True)
+            self.actions.create_cuboid_mode.setEnabled(True)
+            self.actions.create_rotation_mode.setEnabled(True)
+            self.actions.create_quadrilateral_mode.setEnabled(True)
+            self.actions.create_circle_mode.setEnabled(True)
+            self.actions.create_circle_fit_mode.setEnabled(True)
+            self.actions.create_line_mode.setEnabled(True)
+            self.actions.create_point_mode.setEnabled(True)
+            self.actions.create_line_strip_mode.setEnabled(True)
+            create_actions[create_mode].setEnabled(False)
         self.actions.edit_mode.setEnabled(not edit)
         self.label_instruction.setText(self.get_labeling_instruction())
 
@@ -4537,7 +4421,7 @@ class LabelingWidget(LabelDialog):
             return
 
         if self.attributes and text:
-            text = self.reset_attribute(text, shape)
+            text = self.reset_attribute(text, self.canvas.shapes[-1])
 
         if text:
             self.label_list.clearSelection()
@@ -5499,13 +5383,13 @@ class LabelingWidget(LabelDialog):
             formats + [f"*{LabelFile.suffix}"]
         )
         file_dialog = FileDialogPreview(self)
-        file_dialog.setFileMode(FileDialogPreview.ExistingFile)
+        file_dialog.setFileMode(QtWidgets.QFileDialog.FileMode.ExistingFile)
         file_dialog.setNameFilter(filters)
         file_dialog.setWindowTitle(
             self.tr("%s - Choose Image or Label file") % __appname__,
         )
         file_dialog.setWindowFilePath(path)
-        file_dialog.setViewMode(FileDialogPreview.Detail)
+        file_dialog.setViewMode(QtWidgets.QFileDialog.ViewMode.Detail)
         if file_dialog.exec():
             filename = file_dialog.selectedFiles()[0]
             if filename:
@@ -5967,23 +5851,29 @@ class LabelingWidget(LabelDialog):
 
         search_pattern = parse_search_pattern(pattern) if pattern else None
 
-        for filename in utils.scan_all_images(dirpath):
+        for file_index, filename in enumerate(
+            utils.scan_all_images(dirpath), start=1
+        ):
             if search_pattern:
-                if not matches_filename(filename, search_pattern):
-                    continue
-
-                if search_pattern.mode == "attribute":
-                    label_file = osp.splitext(filename)[0] + ".json"
-                    if self.output_dir:
-                        label_file_without_path = osp.basename(label_file)
-                        label_file = (
-                            self.output_dir + "/" + label_file_without_path
-                        )
-
-                    if not matches_label_attribute(
-                        filename, label_file, search_pattern
-                    ):
+                if search_pattern.mode == "index":
+                    if search_pattern.index != file_index:
                         continue
+                else:
+                    if not matches_filename(filename, search_pattern):
+                        continue
+
+                    if search_pattern.mode == "attribute":
+                        label_file = osp.splitext(filename)[0] + ".json"
+                        if self.output_dir:
+                            label_file_without_path = osp.basename(label_file)
+                            label_file = (
+                                self.output_dir + "/" + label_file_without_path
+                            )
+
+                        if not matches_label_attribute(
+                            filename, label_file, search_pattern
+                        ):
+                            continue
 
             image_files.append(filename)
             label_file = osp.splitext(filename)[0] + ".json"
@@ -6029,6 +5919,17 @@ class LabelingWidget(LabelDialog):
         """Apply auto labeling results to the current image."""
         if not self.image or not self.image_path:
             return
+
+        result_image_path = getattr(auto_labeling_result, "image_path", None)
+        if result_image_path and self.filename:
+            current_filename = osp.normpath(osp.abspath(self.filename))
+            result_filename = osp.normpath(osp.abspath(result_image_path))
+            if result_filename != current_filename:
+                logger.warning(
+                    "Ignore stale auto labeling result for "
+                    f"{result_filename}; current file is {current_filename}"
+                )
+                return
 
         # Clear existing shapes
         if auto_labeling_result.replace:

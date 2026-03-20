@@ -53,6 +53,7 @@ class Shape:
         "flags",
         "description",
         "attributes",
+        "kie_linking",
     ]
 
     # The following class variables influence the drawing of all shape objects.
@@ -66,6 +67,12 @@ class Shape:
     point_size = 4
     scale = 1.5
     line_width = 2.0
+    CUBOID_FRONT_LEFT_EDGE_CENTER = 8
+    CUBOID_FRONT_RIGHT_EDGE_CENTER = 9
+    CUBOID_FRONT_TOP_EDGE_CENTER = 10
+    CUBOID_FRONT_BOTTOM_EDGE_CENTER = 11
+    CUBOID_BACK_LEFT_EDGE_CENTER = 12
+    CUBOID_BACK_RIGHT_EDGE_CENTER = 13
 
     def __init__(
         self,
@@ -89,6 +96,7 @@ class Shape:
         self.kie_linking = kie_linking
         self.points = []
         self.fill = False
+        self.hovered = False
         self.selected = False
         self.shape_type = shape_type
         self.flags = flags
@@ -123,6 +131,8 @@ class Shape:
 
     def to_dict(self):
         points = self.points
+        if self.shape_type == "cuboid" and len(self.points) >= 8:
+            self.sync_cuboid_depth_vector()
         # Keep backwards compatibility for circles: if an ellipse-handle circle is
         # still a perfect circle, save it using the legacy 2-point format.
         if self.shape_type == "circle" and len(self.points) == self.ELLIPSE_POINT_COUNT:
@@ -131,7 +141,6 @@ class Shape:
             ry = abs(self.points[self._ELLIPSE_BOTTOM].y() - center.y())
             if abs(rx - ry) < 1e-6:
                 points = [self.points[self._ELLIPSE_CENTER], self.points[self._ELLIPSE_RIGHT]]
-
         dictData = {
             "label": self.label,
             "score": self.score,
@@ -166,6 +175,8 @@ class Shape:
         if self.shape_type == "rotation":
             self.direction = data.get("direction", 0)
         self.other_data = {k: v for k, v in data.items() if k not in self.KEYS}
+        if self.shape_type == "cuboid" and "cuboid3d" not in self.other_data:
+            self.sync_cuboid_depth_vector()
         if close:
             self.close()
         return self
@@ -195,6 +206,7 @@ class Shape:
             "line",
             "circle",
             "linestrip",
+            "cuboid",
         ]
 
     def close(self):
@@ -206,6 +218,8 @@ class Shape:
         self._closed = True
 
     def reach_max_points(self):
+        if self.shape_type == "cuboid":
+            return len(self.points) >= 8
         if len(self.points) >= 4:
             return True
         return False
@@ -214,6 +228,9 @@ class Shape:
         """Add a point"""
         if self.shape_type == "rectangle":
             if not self.reach_max_points():
+                self.points.append(point)
+        elif self.shape_type == "cuboid":
+            if len(self.points) < 8:
                 self.points.append(point)
         elif self.shape_type == "quadrilateral":
             if self.points and point == self.points[0]:
@@ -235,6 +252,151 @@ class Shape:
         if self.shape_type == "quadrilateral":
             return len(self.points) < 4
         return False
+
+    def get_cuboid_depth_vector(self):
+        cuboid_data = self.other_data.get("cuboid3d", {})
+        if isinstance(cuboid_data, dict):
+            depth_vector = cuboid_data.get("depth_vector", None)
+            if (
+                isinstance(depth_vector, (list, tuple))
+                and len(depth_vector) == 2
+            ):
+                return [float(depth_vector[0]), float(depth_vector[1])]
+        if self.shape_type == "cuboid" and len(self.points) >= 5:
+            return [
+                float(self.points[4].x() - self.points[0].x()),
+                float(self.points[4].y() - self.points[0].y()),
+            ]
+        return [0.0, 0.0]
+
+    def set_cuboid_depth_vector(
+        self,
+        depth_vector,
+        mode="from_rectangle",
+        source="manual",
+    ):
+        self.other_data["cuboid3d"] = {
+            "version": 1,
+            "mode": mode,
+            "vertices2d_order": [
+                "front_tl",
+                "front_tr",
+                "front_br",
+                "front_bl",
+                "back_tl",
+                "back_tr",
+                "back_br",
+                "back_bl",
+            ],
+            "depth_vector": [float(depth_vector[0]), float(depth_vector[1])],
+            "source": source,
+        }
+
+    def sync_cuboid_depth_vector(self):
+        if self.shape_type != "cuboid" or len(self.points) < 5:
+            return
+        depth_vector = [
+            float(self.points[4].x() - self.points[0].x()),
+            float(self.points[4].y() - self.points[0].y()),
+        ]
+        cuboid_data = self.other_data.get("cuboid3d", {})
+        mode = (
+            cuboid_data.get("mode", "from_rectangle")
+            if isinstance(cuboid_data, dict)
+            else "from_rectangle"
+        )
+        source = (
+            cuboid_data.get("source", "manual")
+            if isinstance(cuboid_data, dict)
+            else "manual"
+        )
+        self.set_cuboid_depth_vector(
+            depth_vector=depth_vector,
+            mode=mode,
+            source=source,
+        )
+
+    def get_cuboid_front_center(self):
+        if self.shape_type != "cuboid" or len(self.points) < 4:
+            return QtCore.QPointF()
+        return QtCore.QPointF(
+            (self.points[0].x() + self.points[2].x()) / 2.0,
+            (self.points[0].y() + self.points[2].y()) / 2.0,
+        )
+
+    def get_cuboid_back_center(self):
+        if self.shape_type != "cuboid" or len(self.points) < 8:
+            return QtCore.QPointF()
+        return QtCore.QPointF(
+            (self.points[4].x() + self.points[6].x()) / 2.0,
+            (self.points[4].y() + self.points[6].y()) / 2.0,
+        )
+
+    @staticmethod
+    def get_mid_point(p1, p2):
+        return QtCore.QPointF(
+            (p1.x() + p2.x()) / 2.0,
+            (p1.y() + p2.y()) / 2.0,
+        )
+
+    def get_cuboid_visible_rear_edge_indices(self):
+        if self.shape_type != "cuboid" or len(self.points) < 8:
+            return []
+        depth_vector = self.get_cuboid_depth_vector()
+        if depth_vector[0] >= 0:
+            return [5, 6]
+        return [4, 7]
+
+    def get_cuboid_visible_rear_center_index(self):
+        if self.shape_type != "cuboid" or len(self.points) < 8:
+            return None
+        depth_vector = self.get_cuboid_depth_vector()
+        if depth_vector[0] >= 0:
+            return self.CUBOID_BACK_RIGHT_EDGE_CENTER
+        return self.CUBOID_BACK_LEFT_EDGE_CENTER
+
+    def get_cuboid_control_point(self, index):
+        if self.shape_type != "cuboid" or len(self.points) < 8:
+            return None
+        if index < len(self.points):
+            return self.points[index]
+        mapping = {
+            self.CUBOID_FRONT_LEFT_EDGE_CENTER: self.get_mid_point(
+                self.points[0], self.points[3]
+            ),
+            self.CUBOID_FRONT_RIGHT_EDGE_CENTER: self.get_mid_point(
+                self.points[1], self.points[2]
+            ),
+            self.CUBOID_FRONT_TOP_EDGE_CENTER: self.get_mid_point(
+                self.points[0], self.points[1]
+            ),
+            self.CUBOID_FRONT_BOTTOM_EDGE_CENTER: self.get_mid_point(
+                self.points[3], self.points[2]
+            ),
+            self.CUBOID_BACK_LEFT_EDGE_CENTER: self.get_mid_point(
+                self.points[4], self.points[7]
+            ),
+            self.CUBOID_BACK_RIGHT_EDGE_CENTER: self.get_mid_point(
+                self.points[5], self.points[6]
+            ),
+        }
+        return mapping.get(index)
+
+    def get_cuboid_visible_control_indices(self):
+        if self.shape_type != "cuboid" or len(self.points) < 8:
+            return []
+        rear_center_index = self.get_cuboid_visible_rear_center_index()
+        return (
+            [0, 1, 2, 3]
+            + self.get_cuboid_visible_rear_edge_indices()
+            + [
+                self.CUBOID_FRONT_LEFT_EDGE_CENTER,
+                self.CUBOID_FRONT_RIGHT_EDGE_CENTER,
+                self.CUBOID_FRONT_TOP_EDGE_CENTER,
+                self.CUBOID_FRONT_BOTTOM_EDGE_CENTER,
+                rear_center_index,
+            ]
+        )
 
     def pop_point(self):
         """Remove and return the last point of the shape"""
@@ -335,6 +497,46 @@ class Shape:
                                 self.draw_vertex(vrtx_path, i)
                     if self.is_closed() or self.label is not None:
                         line_path.lineTo(self.points[0])
+            elif self.shape_type == "cuboid":
+                if len(self.points) in [1, 2]:
+                    return
+                if len(self.points) != 8:
+                    logger.error(
+                        f"Invalid points count for cuboid: expected 8, got {len(self.points)}"
+                    )
+                    return
+                front = [0, 1, 2, 3]
+                back = [4, 5, 6, 7]
+                links = [(0, 4), (1, 5), (2, 6), (3, 7)]
+                line_path.moveTo(self.points[front[0]])
+                for i in front[1:]:
+                    line_path.lineTo(self.points[i])
+                line_path.lineTo(self.points[front[0]])
+                link_path = QtGui.QPainterPath()
+                for i, j in links:
+                    link_path.moveTo(self.points[i])
+                    link_path.lineTo(self.points[j])
+                back_path = QtGui.QPainterPath()
+                back_path.moveTo(self.points[back[0]])
+                for i in back[1:]:
+                    back_path.lineTo(self.points[i])
+                back_path.lineTo(self.points[back[0]])
+                painter.drawPath(link_path)
+                back_pen = QtGui.QPen(pen)
+                back_pen.setStyle(QtCore.Qt.PenStyle.DashLine)
+                painter.setPen(back_pen)
+                painter.drawPath(back_path)
+                painter.setPen(pen)
+                orient_pen = QtGui.QPen(QtGui.QColor(255, 165, 0, 220))
+                orient_pen.setWidth(
+                    max(1, int(round(self.line_width / self.scale)))
+                )
+                painter.setPen(orient_pen)
+                painter.drawLine(self.points[0], self.points[1])
+                painter.setPen(pen)
+                if self.selected or self.hovered:
+                    for i in self.get_cuboid_visible_control_indices():
+                        self.draw_vertex(vrtx_path, i)
             elif self.shape_type == "circle":
                 if len(self.points) not in [1, 2, self.ELLIPSE_POINT_COUNT]:
                     logger.error(
@@ -472,7 +674,12 @@ class Shape:
         """Draw a vertex"""
         d = self.point_size / self.scale
         shape = self.point_type
-        point = self.points[i]
+        if self.shape_type == "cuboid":
+            point = self.get_cuboid_control_point(i)
+        else:
+            point = self.points[i]
+        if point is None:
+            return
         if i == self._highlight_index:
             size, shape = self._highlight_settings[self._highlight_mode]
             d *= size
@@ -513,10 +720,16 @@ class Shape:
         """
         min_distance = float("inf")
         min_i = None
-        start = 0
-        if self.shape_type == "circle" and len(self.points) == self.ELLIPSE_POINT_COUNT:
-            start = 1  # Skip center handle for ellipse editing.
-        for i, p in enumerate(self.points[start:], start=start):
+        indices = range(len(self.points))
+        if (
+            self.shape_type == "circle"
+            and len(self.points) == self.ELLIPSE_POINT_COUNT
+        ):
+            indices = range(1, len(self.points))
+        if self.shape_type == "cuboid":
+            indices = range(min(4, len(self.points)))
+        for i in indices:
+            p = self.points[i]
             dist = utils.distance(p - point)
             if dist <= epsilon and dist < min_distance:
                 min_distance = dist
@@ -537,6 +750,8 @@ class Shape:
 
     def contains_point(self, point):
         """Check if shape contains a point"""
+        if self.shape_type == "cuboid":
+            return self.bounding_rect().contains(point)
         return self.make_path().contains(point)
 
     def get_circle_rect_from_line(self, line):
@@ -601,6 +816,18 @@ class Shape:
             path = QtGui.QPainterPath(self.points[0])
             for p in self.points[1:]:
                 path.lineTo(p)
+        elif self.shape_type == "cuboid":
+            path = QtGui.QPainterPath(self.points[0])
+            if len(self.points) >= 4:
+                for p in self.points[1:4]:
+                    path.lineTo(p)
+                path.closeSubpath()
+            if len(self.points) >= 8:
+                back_path = QtGui.QPainterPath(self.points[4])
+                for p in self.points[5:8]:
+                    back_path.lineTo(p)
+                back_path.closeSubpath()
+                path.addPath(back_path)
         elif self.shape_type == "circle":
             path = QtGui.QPainterPath()
             rectangle = self.get_circle_or_ellipse_rect()

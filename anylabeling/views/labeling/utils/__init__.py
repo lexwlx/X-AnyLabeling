@@ -57,6 +57,7 @@ from .shape import (
     fit_circle_or_ellipse,
     rectangle_from_diagonal,
     shape_conversion,
+    open_shape_converter,
 )
 from .upload import (
     upload_image_flags_file,
