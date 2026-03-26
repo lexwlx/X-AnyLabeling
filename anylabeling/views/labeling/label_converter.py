@@ -22,7 +22,10 @@ from typing import Any, Dict, List
 from anylabeling.app_info import __version__
 from anylabeling.views.labeling.logger import logger
 from anylabeling.views.labeling.schema import create_xlabel_template
-from anylabeling.views.labeling.utils.shape import rectangle_from_diagonal
+from anylabeling.views.labeling.utils.shape import (
+    build_contour_polygon_points,
+    rectangle_from_diagonal,
+)
 from anylabeling.views.labeling.utils.general import is_possible_rectangle
 
 
@@ -495,7 +498,18 @@ class LabelConverter:
     @staticmethod
     def read_json(file_path: str, encoding: str = "utf-8") -> Dict[str, Any]:
         with open(file_path, "r", encoding=encoding) as f:
-            return json.load(f)
+            data = json.load(f)
+
+        for shape in data.get("shapes", []):
+            if shape.get("shape_type") != "contour":
+                continue
+            shape["points"] = build_contour_polygon_points(
+                shape.get("points", []),
+                shape.get("segments", []),
+            )
+            shape["shape_type"] = "polygon"
+
+        return data
 
     #################################################
     #                Upload Methods                 #

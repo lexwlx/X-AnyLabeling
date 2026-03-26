@@ -51,6 +51,7 @@ from .shape import (
     build_contour_polygon_points,
     masks_to_bboxes,
     polygons_to_mask,
+    get_circular_arc_path_params,
     sample_arc_points,
     shape_to_mask,
     shapes_to_label,

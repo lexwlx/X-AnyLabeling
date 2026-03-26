@@ -6,6 +6,7 @@ from PyQt5 import QtCore
 from anylabeling.views.labeling.shape import Shape
 from anylabeling.views.labeling.utils.shape import (
     build_contour_polygon_points,
+    get_circular_arc_path_params,
     shape_to_mask,
     fit_circle_or_ellipse,
     sample_arc_points,
@@ -149,6 +150,18 @@ class TestCircleEllipse(unittest.TestCase):
         self.assertGreater(len(sampled), 3)
         self.assertGreater(max(point[1] for point in sampled), 0.9)
 
+    def test_get_circular_arc_path_params_returns_true_arc_geometry(self):
+        params = get_circular_arc_path_params(
+            start=[0.0, 0.0],
+            mid=[1.0, 1.0],
+            end=[2.0, 0.0],
+        )
+        self.assertIsNotNone(params)
+        self.assertAlmostEqual(params["center"][0], 1.0, places=3)
+        self.assertAlmostEqual(params["center"][1], 0.0, places=3)
+        self.assertAlmostEqual(params["radius"], 1.0, places=3)
+        self.assertAlmostEqual(abs(params["sweep_angle"]), 180.0, places=3)
+
     def test_build_contour_polygon_points_merges_line_and_arc(self):
         polygon = build_contour_polygon_points(
             anchor_points=[
@@ -167,3 +180,20 @@ class TestCircleEllipse(unittest.TestCase):
         self.assertEqual(polygon[0], [0.0, 0.0])
         self.assertNotEqual(polygon[-1], [0.0, 0.0])
         self.assertGreater(len(polygon), 4)
+
+    def test_shape_to_mask_contour_uses_segment_semantics(self):
+        mask = shape_to_mask(
+            img_shape=(100, 100, 3),
+            points=[[20, 20], [80, 20], [80, 80], [20, 80]],
+            shape_type="contour",
+            other_data={
+                "segments": [
+                    {"type": "line"},
+                    {"type": "line"},
+                    {"type": "line"},
+                    {"type": "arc", "mid": [50, 5]},
+                ]
+            },
+        )
+        self.assertTrue(mask[50, 50])
+        self.assertFalse(mask[2, 50])

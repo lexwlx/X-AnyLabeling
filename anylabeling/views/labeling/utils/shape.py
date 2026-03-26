@@ -467,19 +467,17 @@ def _ccw_angle_delta(start_angle, end_angle):
     return delta
 
 
-def sample_arc_points(start, mid, end, max_segment_length=8.0):
-    """Sample a circular arc defined by 3 points.
+def get_circular_arc_path_params(start, mid, end):
+    """Calculate true circular-arc parameters for Qt path rendering.
 
     Args:
         start (Sequence[float]): Arc start point.
-        mid (Sequence[float]): A point that lies on the desired arc.
+        mid (Sequence[float]): A point that lies on the arc.
         end (Sequence[float]): Arc end point.
-        max_segment_length (float): Maximum distance between adjacent
-            sampled points.
 
     Returns:
-        list[list[float]]: Sampled points including start and end. Falls
-        back to a straight segment when the 3 points are degenerate.
+        dict | None: Arc geometry for `QPainterPath.arcTo`, or `None` when
+            the three points are degenerate/collinear.
     """
     start = np.asarray(start, dtype=np.float64)
     mid = np.asarray(mid, dtype=np.float64)
@@ -498,30 +496,67 @@ def sample_arc_points(start, mid, end, max_segment_length=8.0):
     det = (x1 - x2) * (y2 - y3) - (x2 - x3) * (y1 - y2)
 
     if abs(det) < 1e-6:
-        return [start.tolist(), end.tolist()]
+        return None
 
     cx = (bc * (y2 - y3) - cd * (y1 - y2)) / det
     cy = ((x1 - x2) * cd - (x2 - x3) * bc) / det
-    center = np.asarray([cx, cy], dtype=np.float64)
-    radius = np.linalg.norm(start - center)
-
+    radius = float(np.linalg.norm(start - np.asarray([cx, cy])))
     if radius <= 1e-6:
-        return [start.tolist(), end.tolist()]
+        return None
 
-    start_angle = math.atan2(y1 - cy, x1 - cx)
-    mid_angle = math.atan2(y2 - cy, x2 - cx)
-    end_angle = math.atan2(y3 - cy, x3 - cx)
+    def qt_angle(point):
+        return math.degrees(math.atan2(cy - point[1], point[0] - cx))
 
-    ccw_total = _ccw_angle_delta(start_angle, end_angle)
-    ccw_mid = _ccw_angle_delta(start_angle, mid_angle)
+    start_angle = qt_angle(start)
+    mid_angle = qt_angle(mid)
+    end_angle = qt_angle(end)
 
+    ccw_total = (end_angle - start_angle) % 360.0
+    ccw_mid = (mid_angle - start_angle) % 360.0
     use_ccw = ccw_mid <= ccw_total + 1e-6
-    total_angle = ccw_total if use_ccw else (2 * math.pi - ccw_total)
+    sweep_angle = ccw_total if use_ccw else ccw_total - 360.0
 
-    if total_angle <= 1e-6:
+    return {
+        "center": [float(cx), float(cy)],
+        "radius": radius,
+        "start_angle": float(start_angle),
+        "sweep_angle": float(sweep_angle),
+        "rect": [
+            float(cx - radius),
+            float(cy - radius),
+            float(2 * radius),
+            float(2 * radius),
+        ],
+    }
+
+
+def sample_arc_points(start, mid, end, max_segment_length=8.0):
+    """Sample a circular arc defined by 3 points.
+
+    Args:
+        start (Sequence[float]): Arc start point.
+        mid (Sequence[float]): A point that lies on the desired arc.
+        end (Sequence[float]): Arc end point.
+        max_segment_length (float): Maximum distance between adjacent
+            sampled points.
+
+    Returns:
+        list[list[float]]: Sampled points including start and end. Falls
+        back to a straight segment when the 3 points are degenerate.
+    """
+    params = get_circular_arc_path_params(start, mid, end)
+    start = np.asarray(start, dtype=np.float64)
+    end = np.asarray(end, dtype=np.float64)
+    if params is None:
         return [start.tolist(), end.tolist()]
 
-    arc_length = radius * total_angle
+    cx, cy = params["center"]
+    radius = params["radius"]
+    sweep_radians = math.radians(params["sweep_angle"])
+    if abs(sweep_radians) <= 1e-6:
+        return [start.tolist(), end.tolist()]
+
+    arc_length = radius * abs(sweep_radians)
     segment_count = max(
         2,
         int(math.ceil(arc_length / max(1.0, float(max_segment_length)))),
@@ -530,15 +565,11 @@ def sample_arc_points(start, mid, end, max_segment_length=8.0):
     samples = []
     for i in range(segment_count + 1):
         t = i / segment_count
-        angle = (
-            start_angle + total_angle * t
-            if use_ccw
-            else start_angle - total_angle * t
-        )
+        angle = math.radians(params["start_angle"]) + sweep_radians * t
         samples.append(
             [
                 float(cx + radius * math.cos(angle)),
-                float(cy + radius * math.sin(angle)),
+                float(cy - radius * math.sin(angle)),
             ]
         )
 
@@ -569,13 +600,16 @@ def build_contour_polygon_points(
     if len(anchors) == 1:
         return [anchors[0].tolist()]
 
-    if len(contour_segments) != len(anchors) - 1:
-        raise ValueError("Contour segments must connect consecutive anchors")
+    is_closed = len(contour_segments) == len(anchors)
+    if not is_closed and len(contour_segments) != len(anchors) - 1:
+        raise ValueError(
+            "Contour segments must connect consecutive anchors"
+        )
 
     polygon_points = [anchors[0].tolist()]
     for index, segment in enumerate(contour_segments):
         start = anchors[index]
-        end = anchors[index + 1]
+        end = anchors[(index + 1) % len(anchors)]
         segment_type = segment.get("type", "line")
 
         if segment_type == "arc" and segment.get("mid") is not None:
@@ -697,12 +731,26 @@ def polygons_to_mask(img_shape, polygons, shape_type=None):
 
 
 def shape_to_mask(
-    img_shape, points, shape_type=None, line_width=10, point_size=5
+    img_shape,
+    points,
+    shape_type=None,
+    line_width=10,
+    point_size=5,
+    other_data=None,
 ):
     mask = np.zeros(img_shape[:2], dtype=np.uint8)
     mask = PIL.Image.fromarray(mask)
     draw = PIL.ImageDraw.Draw(mask)
     xy = [tuple(point) for point in points]
+    if shape_type == "contour":
+        segments = []
+        if isinstance(other_data, dict):
+            segments = other_data.get("segments", [])
+        xy = [
+            tuple(point)
+            for point in build_contour_polygon_points(points, segments)
+        ]
+        shape_type = "polygon"
     if shape_type == "circle":
         assert len(xy) in [
             2,
@@ -773,7 +821,10 @@ def shapes_to_label(img_shape, shapes, label_name_to_value):
         ins_id = instances.index(instance) + 1
         cls_id = label_name_to_value[cls_name]
 
-        mask = shape_to_mask(img_shape[:2], points, shape_type)
+        other_data = {k: v for k, v in shape.items() if k not in ["points"]}
+        mask = shape_to_mask(
+            img_shape[:2], points, shape_type, other_data=other_data
+        )
         cls[mask] = cls_id
         ins[mask] = ins_id
 

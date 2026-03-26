@@ -199,6 +199,7 @@ class Shape:
     def get_supported_shape():
         return [
             "polygon",
+            "contour",
             "rectangle",
             "rotation",
             "quadrilateral",
@@ -252,6 +253,40 @@ class Shape:
         if self.shape_type == "quadrilateral":
             return len(self.points) < 4
         return False
+
+    def get_contour_segments(self):
+        """Return contour segment metadata for semantic contour shapes."""
+        if self.shape_type != "contour":
+            return []
+        segments = self.other_data.get("segments", [])
+        return segments if isinstance(segments, list) else []
+
+    def get_contour_polygon_points(self):
+        """Sample a contour shape into polygon points for painting/masking."""
+        if self.shape_type != "contour" or not self.points:
+            return []
+        sampled = utils.build_contour_polygon_points(
+            [(point.x(), point.y()) for point in self.points],
+            self.get_contour_segments(),
+        )
+        return [QtCore.QPointF(x, y) for x, y in sampled]
+
+    @staticmethod
+    def append_contour_segment_to_path(path, start, end, segment):
+        """Append a contour line/arc segment to a painter path."""
+        if segment.get("type") == "arc" and segment.get("mid") is not None:
+            params = utils.get_circular_arc_path_params(
+                (start.x(), start.y()),
+                segment["mid"],
+                (end.x(), end.y()),
+            )
+            if params is not None:
+                rect = QtCore.QRectF(*params["rect"])
+                path.arcTo(
+                    rect, params["start_angle"], params["sweep_angle"]
+                )
+                return
+        path.lineTo(end)
 
     def get_cuboid_depth_vector(self):
         cuboid_data = self.other_data.get("cuboid3d", {})
@@ -553,6 +588,19 @@ class Shape:
                         start = 1  # Hide center handle, show 4 axis handles.
                     for i in range(start, len(self.points)):
                         self.draw_vertex(vrtx_path, i)
+            elif self.shape_type == "contour":
+                sampled_points = self.get_contour_polygon_points()
+                if len(sampled_points) < 3:
+                    logger.error(
+                        "Invalid points count for contour: "
+                        "expected at least 3 sampled points"
+                    )
+                    return
+                line_path = self.make_path()
+                self.draw_vertex(vrtx_path, 0)
+                for i, _ in enumerate(self.points[1:], start=1):
+                    if self.selected:
+                        self.draw_vertex(vrtx_path, i)
             elif self.shape_type == "linestrip":
                 line_path.moveTo(self.points[0])
                 for i, p in enumerate(self.points):
@@ -833,6 +881,25 @@ class Shape:
             rectangle = self.get_circle_or_ellipse_rect()
             if rectangle is not None:
                 path.addEllipse(rectangle)
+        elif self.shape_type == "contour":
+            if not self.points:
+                return QtGui.QPainterPath()
+            path = QtGui.QPainterPath(self.points[0])
+            segments = self.get_contour_segments()
+            if len(segments) not in [len(self.points) - 1, len(self.points)]:
+                return path
+            for index, segment in enumerate(segments):
+                end = self.points[(index + 1) % len(self.points)]
+                self.append_contour_segment_to_path(
+                    path,
+                    self.points[index],
+                    end,
+                    segment,
+                )
+            if self.is_closed() or len(self.get_contour_segments()) == len(
+                self.points
+            ):
+                path.closeSubpath()
         else:
             path = QtGui.QPainterPath(self.points[0])
             for p in self.points[1:]:
@@ -846,6 +913,13 @@ class Shape:
     def move_by(self, offset):
         """Move all points by an offset"""
         self.points = [p + offset for p in self.points]
+        if self.shape_type == "contour":
+            for segment in self.get_contour_segments():
+                if segment.get("type") == "arc" and segment.get("mid") is not None:
+                    segment["mid"] = [
+                        float(segment["mid"][0] + offset.x()),
+                        float(segment["mid"][1] + offset.y()),
+                    ]
 
     def move_vertex_by(self, i, offset):
         """Move a specific vertex by an offset"""

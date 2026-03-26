@@ -308,7 +308,7 @@ class Canvas(
         shape = shape or self.current
         if shape is None:
             return []
-        return shape.other_data.setdefault("_contour_segments", [])
+        return shape.other_data.setdefault("segments", [])
 
     @staticmethod
     def _point_to_xy(point):
@@ -360,6 +360,18 @@ class Canvas(
         self._get_contour_segments().append(segment)
         return True
 
+    def _append_contour_closing_segment(self, segment_type=None):
+        """Append the closing segment without duplicating the first anchor."""
+        if not self.current or len(self.current.points) < 2:
+            return False
+
+        segment_type = segment_type or self.contour_segment_type
+        segment = {"type": segment_type}
+        if segment_type == "arc" and self.contour_arc_point is not None:
+            segment["mid"] = self._point_to_xy(self.contour_arc_point)
+        self._get_contour_segments().append(segment)
+        return True
+
     def _try_close_contour(self, pos):
         """Close the contour when the cursor is near the starting point."""
         if not self.current or len(self.current.points) < 2:
@@ -373,7 +385,7 @@ class Canvas(
         if segment_type == "arc" and self.contour_arc_point is None:
             return False
 
-        if not self._append_contour_segment(end_point, segment_type):
+        if not self._append_contour_closing_segment(segment_type):
             return False
 
         self.contour_arc_point = None
@@ -393,7 +405,7 @@ class Canvas(
         return [QtCore.QPointF(x, y) for x, y in polygon_points]
 
     def _finalise_contour_shape(self):
-        """Finalize the contour builder into a single polygon feature."""
+        """Finalize the contour builder as a semantic contour feature."""
         if not self.current:
             return
 
@@ -401,25 +413,7 @@ class Canvas(
         if len(polygon_points) < 3:
             return
 
-        contour_shape = Shape(
-            label=self.current.label,
-            score=self.current.score,
-            line_color=QtGui.QColor(self.current.line_color),
-            shape_type="polygon",
-            flags=deepcopy(self.current.flags),
-            group_id=self.current.group_id,
-            description=self.current.description,
-            difficult=self.current.difficult,
-            attributes=deepcopy(self.current.attributes),
-            kie_linking=deepcopy(self.current.kie_linking),
-        )
-        contour_shape.other_data = {
-            key: deepcopy(value)
-            for key, value in self.current.other_data.items()
-            if key != "_contour_segments"
-        }
-        contour_shape.points = polygon_points
-        self.current = contour_shape
+        self.current.shape_type = "contour"
         self.contour_arc_point = None
         self.contour_segment_type = "line"
         self.finalise()
@@ -436,16 +430,7 @@ class Canvas(
         for index, segment in enumerate(self._get_contour_segments()):
             start = anchors[index]
             end = anchors[index + 1]
-            if segment.get("type") == "arc" and segment.get("mid") is not None:
-                arc_points = utils.sample_arc_points(
-                    self._point_to_xy(start),
-                    segment["mid"],
-                    self._point_to_xy(end),
-                )
-                for x, y in arc_points[1:]:
-                    path.lineTo(QtCore.QPointF(x, y))
-            else:
-                path.lineTo(end)
+            Shape.append_contour_segment_to_path(path, start, end, segment)
 
         if preview_point is not None:
             start = anchors[-1]
@@ -453,13 +438,15 @@ class Canvas(
                 self.contour_segment_type == "arc"
                 and self.contour_arc_point is not None
             ):
-                arc_points = utils.sample_arc_points(
-                    self._point_to_xy(start),
-                    self._point_to_xy(self.contour_arc_point),
-                    self._point_to_xy(preview_point),
+                Shape.append_contour_segment_to_path(
+                    path,
+                    start,
+                    preview_point,
+                    {
+                        "type": "arc",
+                        "mid": self._point_to_xy(self.contour_arc_point),
+                    },
                 )
-                for x, y in arc_points[1:]:
-                    path.lineTo(QtCore.QPointF(x, y))
             else:
                 path.lineTo(preview_point)
 
@@ -1422,6 +1409,8 @@ class Canvas(
                                 pos, segment_type
                             ):
                                 self.contour_arc_point = None
+                                if segment_type == "arc":
+                                    self.contour_segment_type = "line"
                         self.line.points = [self.current[-1], self.current[-1]]
                         self.update()
                         return
@@ -1430,9 +1419,9 @@ class Canvas(
                         self.out_off_pixmap(pos)
                         and "polygon" in self.allowed_oop_shape_types
                     ):
-                        self.current = Shape(shape_type="polygon")
+                        self.current = Shape(shape_type="contour")
                         self.current.add_point(pos)
-                        self.current.other_data["_contour_segments"] = []
+                        self.current.other_data["segments"] = []
                         self.line.points = [pos, pos]
                         self.set_hiding()
                         self.drawing_polygon.emit(True)
@@ -2679,6 +2668,7 @@ class Canvas(
                 if shape.group_id is None or shape.shape_type not in [
                     "rectangle",
                     "polygon",
+                    "contour",
                     "rotation",
                     "quadrilateral",
                     "cuboid",
@@ -2728,6 +2718,7 @@ class Canvas(
                     continue
                 if shape.shape_type not in [
                     "polygon",
+                    "contour",
                     "rectangle",
                     "rotation",
                     "quadrilateral",
@@ -2735,6 +2726,8 @@ class Canvas(
                 ]:
                     continue
                 if shape.shape_type == "polygon" and len(shape.points) < 3:
+                    continue
+                if shape.shape_type == "contour" and len(shape.points) < 3:
                     continue
                 if shape.shape_type == "rectangle" and len(shape.points) < 2:
                     continue
@@ -2760,6 +2753,8 @@ class Canvas(
                         mask_path.lineTo(point)
                     if shape.is_closed() or len(shape.points) >= 3:
                         mask_path.closeSubpath()
+                elif shape.shape_type == "contour":
+                    mask_path = shape.make_path()
                 elif shape.shape_type == "rectangle":
                     if len(shape.points) == 2:
                         rectangle = shape.get_rect_from_line(*shape.points)
@@ -3144,6 +3139,7 @@ class Canvas(
                 if shape.shape_type in [
                     "rectangle",
                     "polygon",
+                    "contour",
                     "rotation",
                     "quadrilateral",
                     "cuboid",
@@ -3747,18 +3743,12 @@ class Canvas(
                     if self.contour_segment_type == "arc":
                         if self.contour_arc_point is None:
                             return
-                        if self._append_contour_segment(
-                            self.current[0], "arc"
-                        ):
+                        if self._append_contour_closing_segment("arc"):
                             self.contour_arc_point = None
+                            self.contour_segment_type = "line"
                             self._finalise_contour_shape()
                     else:
-                        if not self.close_enough(
-                            self.current[-1], self.current[0]
-                        ):
-                            self._append_contour_segment(
-                                self.current[0], "line"
-                            )
+                        self._append_contour_closing_segment("line")
                         self._finalise_contour_shape()
                     return
                 elif modifiers == QtCore.Qt.KeyboardModifier.AltModifier:
